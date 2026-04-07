@@ -7,10 +7,12 @@ import type { ChatMessage } from '../types/chat'
 interface ChatState {
   messagesBySession: Map<string, ChatMessage[]>
   sessionStreaming: Record<string, boolean>
+  sessionPaused: Record<string, boolean>
   ensureSession: (sessionId: string) => void
   pushMessage: (sessionId: string, message: ChatMessage) => void
   addChunkMessage: (sessionId: string, chunk: string) => void
   clearSessionMessages: (sessionId: string) => void
+  removeMessageById: (sessionId: string, messageId: string) => void
   appendToMessageById: (sessionId: string, messageId: string, chunk: string) => void
   updateMessageById: (
     sessionId: string,
@@ -18,6 +20,7 @@ interface ChatState {
     updater: (message: ChatMessage) => ChatMessage,
   ) => void
   setSessionStreaming: (sessionId: string, streaming: boolean) => void
+  setSessionPaused: (sessionId: string, paused: boolean) => void
 }
 
 export const useChatStore = create(
@@ -25,6 +28,7 @@ export const useChatStore = create(
     (set: (fn: (state: ChatState) => Partial<ChatState>) => void) => ({
       messagesBySession: new Map<string, ChatMessage[]>(Object.entries(mockMessagesBySession)),
       sessionStreaming: {},
+      sessionPaused: {},
       ensureSession: (sessionId: string) => {
         set((state: ChatState) => {
           if (state.messagesBySession.has(sessionId)) {
@@ -68,6 +72,15 @@ export const useChatStore = create(
           return { messagesBySession: next }
         })
       },
+      removeMessageById: (sessionId: string, messageId: string) => {
+        set((state: ChatState) => {
+          const next = new Map(state.messagesBySession)
+          const list = next.get(sessionId) ?? []
+          const filtered = list.filter((message) => message.id !== messageId)
+          next.set(sessionId, filtered)
+          return { messagesBySession: next }
+        })
+      },
       appendToMessageById: (sessionId: string, messageId: string, chunk: string) => {
         set((state: ChatState) => {
           const next = new Map(state.messagesBySession)
@@ -102,6 +115,14 @@ export const useChatStore = create(
           sessionStreaming: {
             ...state.sessionStreaming,
             [sessionId]: streaming,
+          },
+        }))
+      },
+      setSessionPaused: (sessionId: string, paused: boolean) => {
+        set((state: ChatState) => ({
+          sessionPaused: {
+            ...state.sessionPaused,
+            [sessionId]: paused,
           },
         }))
       },

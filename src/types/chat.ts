@@ -1,6 +1,6 @@
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-export type MessageStatus = 'done' | 'streaming'
+export type MessageStatus = 'done' | 'streaming' | 'paused'
 
 export type MessageType = 'text' | 'image' | 'file'
 

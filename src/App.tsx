@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChatInput } from './components/chat/ChatInput'
 import { MessageList } from './components/chat/MessageList'
 import { Sidebar } from './components/layout/Sidebar'
@@ -10,6 +10,13 @@ import { useThemeStore } from './store/themeStore'
 import { useUIStore } from './store/uiStore'
 import type { ChatMessage, UploadItem } from './types/chat'
 
+interface StreamTaskMeta {
+  assistantId: string
+  prompt: string
+  model: string
+  baseContext: ChatMessage[]
+}
+
 function nowTimeLabel(): string {
   return new Date().toLocaleTimeString('zh-CN', {
     hour: '2-digit',
@@ -20,7 +27,16 @@ function nowTimeLabel(): string {
 
 function App() {
   const streamClosersRef = useRef<Map<string, () => void>>(new Map())
+  const streamTasksRef = useRef<Map<string, StreamTaskMeta>>(new Map())
+  const [regenerateFlags, setRegenerateFlags] = useState<Record<string, boolean>>({})
   const uploadTimersRef = useRef<Set<number>>(new Set())
+  const setCanRegenerate = (sessionId: string, canRegenerate: boolean) => {
+    setRegenerateFlags((prev) => ({
+      ...prev,
+      [sessionId]: canRegenerate,
+    }))
+  }
+
 
   const sessions = useSessionStore((state) => state.sessions)
   const activeSessionId = useSessionStore((state) => state.activeSessionId)
@@ -33,11 +49,15 @@ function App() {
   const pushMessage = useChatStore((state) => state.pushMessage)
   const addChunkMessage = useChatStore((state) => state.addChunkMessage)
   const clearSessionMessages = useChatStore((state) => state.clearSessionMessages)
+  const removeMessageById = useChatStore((state) => state.removeMessageById)
+  const appendToMessageById = useChatStore((state) => state.appendToMessageById)
   const updateMessageById = useChatStore((state) => state.updateMessageById)
   const setSessionStreaming = useChatStore((state) => state.setSessionStreaming)
+  const setSessionPaused = useChatStore((state) => state.setSessionPaused)
   const isStreaming = useChatStore(
     (state) => state.sessionStreaming[activeSessionId] ?? false,
   )
+  const isPaused = useChatStore((state) => state.sessionPaused[activeSessionId] ?? false)
 
   const themeMode = useThemeStore((state) => state.mode)
   const toggleTheme = useThemeStore((state) => state.toggleMode)
@@ -78,19 +98,36 @@ function App() {
     prompt: string,
     model: string,
     contextMessages: ChatMessage[],
+    assistantIdOverride?: string,
   ) => {
-    const assistantId = crypto.randomUUID()
+    const assistantId = assistantIdOverride ?? crypto.randomUUID()
     const tokenKey = (import.meta.env.VITE_AUTH_TOKEN_KEY as string | undefined) ?? 'access_token'
     const token = window.localStorage.getItem(tokenKey) ?? undefined
 
-    pushMessage(sessionId, {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      createdAt: nowTimeLabel(),
-      status: 'streaming',
-    })
+    if (assistantIdOverride) {
+      updateMessageById(sessionId, assistantId, (message) => ({
+        ...message,
+        status: 'streaming',
+      }))
+    } else {
+      pushMessage(sessionId, {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        createdAt: nowTimeLabel(),
+        status: 'streaming',
+      })
+    }
+
     setSessionStreaming(sessionId, true)
+    setSessionPaused(sessionId, false)
+    streamTasksRef.current.set(sessionId, {
+      assistantId,
+      prompt,
+      model,
+      baseContext: contextMessages,
+    })
+    setCanRegenerate(sessionId, true)
 
     // 同一会话只保留一条流式连接，避免重复发送造成消息竞争。
     streamClosersRef.current.get(sessionId)?.()
@@ -111,6 +148,10 @@ function App() {
         })),
       token,
       onChunk: (chunk) => {
+        if (assistantIdOverride) {
+          appendToMessageById(sessionId, assistantId, chunk)
+          return
+        }
         addChunkMessage(sessionId, chunk)
       },
       onDone: () => {
@@ -127,6 +168,7 @@ function App() {
         }
 
         setSessionStreaming(sessionId, false)
+        setSessionPaused(sessionId, false)
         streamClosersRef.current.delete(sessionId)
       },
       onError: (errorMessage) => {
@@ -139,11 +181,96 @@ function App() {
           status: 'done',
         }))
         setSessionStreaming(sessionId, false)
+        setSessionPaused(sessionId, false)
         streamClosersRef.current.delete(sessionId)
       },
     })
 
     streamClosersRef.current.set(sessionId, close)
+  }
+
+  const handlePause = () => {
+    if (!isStreaming) {
+      return
+    }
+
+    const close = streamClosersRef.current.get(activeSessionId)
+    if (!close) {
+      return
+    }
+
+    close()
+    streamClosersRef.current.delete(activeSessionId)
+    setSessionStreaming(activeSessionId, false)
+    setSessionPaused(activeSessionId, true)
+
+    const task = streamTasksRef.current.get(activeSessionId)
+    if (task) {
+      updateMessageById(activeSessionId, task.assistantId, (message) => ({
+        ...message,
+        status: 'paused',
+      }))
+    }
+  }
+
+  const handleResume = () => {
+    const task = streamTasksRef.current.get(activeSessionId)
+    if (!task || !isPaused) {
+      return
+    }
+
+    const messages = useChatStore.getState().messagesBySession.get(activeSessionId) ?? []
+    const partial = messages.find((item) => item.id === task.assistantId)?.content ?? ''
+
+    const resumePrompt = partial.trim()
+      ? `请继续上一条回答，从“${partial.slice(-120)}”之后继续，不要重复已输出内容。`
+      : task.prompt
+
+    const resumeContext: ChatMessage[] = [
+      ...task.baseContext,
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: partial,
+        createdAt: nowTimeLabel(),
+        status: 'done',
+      },
+      {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: resumePrompt,
+        createdAt: nowTimeLabel(),
+        status: 'done',
+      },
+    ]
+
+    startStreamReply(
+      activeSessionId,
+      resumePrompt,
+      task.model,
+      resumeContext,
+      task.assistantId,
+    )
+  }
+
+  const handleRegenerate = () => {
+    const task = streamTasksRef.current.get(activeSessionId)
+    if (!task) {
+      return
+    }
+
+    streamClosersRef.current.get(activeSessionId)?.()
+    streamClosersRef.current.delete(activeSessionId)
+    setSessionStreaming(activeSessionId, false)
+    setSessionPaused(activeSessionId, false)
+    removeMessageById(activeSessionId, task.assistantId)
+
+    startStreamReply(
+      activeSessionId,
+      task.prompt,
+      task.model,
+      task.baseContext,
+    )
   }
 
   const handleNewSession = () => {
@@ -209,6 +336,8 @@ function App() {
 
   const handleClearMessages = () => {
     clearSessionMessages(activeSessionId)
+    streamTasksRef.current.delete(activeSessionId)
+    setCanRegenerate(activeSessionId, false)
     updateSessionPreview(activeSessionId, '会话已清空')
   }
 
@@ -248,8 +377,14 @@ function App() {
           title={activeSession.title}
           model={activeSession.model}
           themeMode={themeMode}
+          isStreaming={isStreaming}
+          isPaused={isPaused}
+          canRegenerate={regenerateFlags[activeSessionId] ?? false}
           onOpenSidebar={() => setMobileSidebarOpen(true)}
           onToggleTheme={toggleTheme}
+          onPause={handlePause}
+          onResume={handleResume}
+          onRegenerate={handleRegenerate}
           onClear={handleClearMessages}
           onExport={handleExport}
         />

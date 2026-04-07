@@ -4,8 +4,14 @@ interface TopBarProps {
   title: string
   model: string
   themeMode: 'light' | 'dark'
+  isStreaming: boolean
+  isPaused: boolean
+  canRegenerate: boolean
   onOpenSidebar: () => void
   onToggleTheme: () => void
+  onPause: () => void
+  onResume: () => void
+  onRegenerate: () => void
   onClear: () => void
   onExport: () => void
 }
@@ -14,8 +20,14 @@ export function TopBar({
   title,
   model,
   themeMode,
+  isStreaming,
+  isPaused,
+  canRegenerate,
   onOpenSidebar,
   onToggleTheme,
+  onPause,
+  onResume,
+  onRegenerate,
   onClear,
   onExport,
 }: TopBarProps) {
@@ -43,6 +55,24 @@ export function TopBar({
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 transition hover:bg-slate-100"
         >
           主题: {themeMode === 'light' ? '浅色' : '深色'}
+        </button>
+
+        <button
+          type="button"
+          onClick={isStreaming ? onPause : onResume}
+          disabled={!isStreaming && !isPaused}
+          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {isStreaming ? '暂停' : '继续'}
+        </button>
+
+        <button
+          type="button"
+          onClick={onRegenerate}
+          disabled={!canRegenerate}
+          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          重新生成
         </button>
 
         <WithPermission permission="chat.clear">
