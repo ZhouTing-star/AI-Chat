@@ -37,6 +37,7 @@ export function ChatInput({
             const files = event.target.files
             if (files && files.length > 0) {
               onPickFile(files)
+              // 允许连续选择同一个文件也能再次触发 onChange。
               event.target.value = ''
             }
           }}
@@ -60,6 +61,7 @@ export function ChatInput({
             placeholder="输入消息，Shift + Enter 换行"
             className="max-h-32 w-full resize-none bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
             onKeyDown={(event) => {
+              // Enter 直接发送，Shift + Enter 才换行，符合常见聊天输入习惯。
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 onSend()

@@ -6,6 +6,7 @@ interface UploadPreviewProps {
 }
 
 function formatFileSize(size: number): string {
+  // 页面展示用的轻量格式化，统一成 B/KB/MB 三档。
   if (size < 1024) {
     return `${size} B`
   }

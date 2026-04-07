@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { MessageItem } from './MessageItem'
 import type { ChatMessage } from '../../types/chat'
 
@@ -5,7 +6,32 @@ interface MessageListProps {
   messages: ChatMessage[]
 }
 
+function debounce<T extends (...args: never[]) => void>(fn: T, wait: number) {
+  let timer: number | null = null
+  return (...args: Parameters<T>) => {
+    if (timer) {
+      window.clearTimeout(timer)
+    }
+    timer = window.setTimeout(() => fn(...args), wait)
+  }
+}
+
 export function MessageList({ messages }: MessageListProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) {
+      return
+    }
+
+    const scrollToBottom = debounce(() => {
+      container.scrollTop = container.scrollHeight
+    }, 24)
+
+    scrollToBottom()
+  }, [messages])
+
   if (messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center">
@@ -20,7 +46,7 @@ export function MessageList({ messages }: MessageListProps) {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-5 lg:px-8">
+    <div ref={containerRef} className="h-full overflow-y-auto px-4 py-5 lg:px-8">
       {messages.map((message) => (
         <MessageItem key={message.id} message={message} />
       ))}
