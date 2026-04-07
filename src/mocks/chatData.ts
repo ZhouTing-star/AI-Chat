@@ -6,21 +6,21 @@ export const mockSessions: ChatSession[] = [
     title: '产品需求讨论',
     updatedAt: '09:38',
     preview: '我先帮你梳理产品 MVP 范围。',
-    model: 'Qwen-Plus',
+    model: 'glm-4-flash',
   },
   {
     id: 's-2',
     title: '前端性能优化',
     updatedAt: '昨天',
     preview: '建议先做消息列表虚拟滚动。',
-    model: 'Qwen-Max',
+    model: 'glm-4-flash',
   },
   {
     id: 's-3',
     title: '多语言文案检查',
     updatedAt: '周五',
     preview: '已完成 zh-CN 与 en-US 对照。',
-    model: 'Qwen-Plus',
+    model: 'glm-4-flash',
   },
 ]
 
