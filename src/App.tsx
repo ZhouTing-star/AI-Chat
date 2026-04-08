@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChatInput } from './components/chat/ChatInput'
 import { MessageList } from './components/chat/MessageList'
+import { KnowledgeBasePage } from './components/knowledge/KnowledgeBasePage'
 import { Sidebar } from './components/layout/Sidebar'
 import { TopBar } from './components/layout/TopBar'
 import { streamChatReply } from './services/chatStream'
@@ -63,8 +64,10 @@ function App() {
   const toggleTheme = useThemeStore((state) => state.toggleMode)
 
   const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen)
+  const page = useUIStore((state) => state.page)
   const inputValue = useUIStore((state) => state.inputValue)
   const uploads = useUIStore((state) => state.uploads)
+  const setPage = useUIStore((state) => state.setPage)
   const setMobileSidebarOpen = useUIStore((state) => state.setMobileSidebarOpen)
   const setInputValue = useUIStore((state) => state.setInputValue)
   const addUploads = useUIStore((state) => state.addUploads)
@@ -374,13 +377,16 @@ function App() {
 
       <section className="flex h-full flex-1 flex-col overflow-hidden bg-slate-50 lg:ml-0 lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white">
         <TopBar
-          title={activeSession.title}
+          title={page === 'knowledge-base' ? '本地知识库管理' : activeSession.title}
           model={activeSession.model}
           themeMode={themeMode}
+          isKnowledgeBasePage={page === 'knowledge-base'}
           isStreaming={isStreaming}
           isPaused={isPaused}
           canRegenerate={regenerateFlags[activeSessionId] ?? false}
           onOpenSidebar={() => setMobileSidebarOpen(true)}
+          onOpenKnowledgeBase={() => setPage('knowledge-base')}
+          onBackToChat={() => setPage('chat')}
           onToggleTheme={toggleTheme}
           onPause={handlePause}
           onResume={handleResume}
@@ -389,19 +395,25 @@ function App() {
           onExport={handleExport}
         />
 
-        <div className="flex-1 overflow-hidden">
-          <MessageList messages={activeMessages} />
-        </div>
+        {page === 'knowledge-base' ? (
+          <KnowledgeBasePage />
+        ) : (
+          <>
+            <div className="flex-1 overflow-hidden">
+              <MessageList messages={activeMessages} />
+            </div>
 
-        <ChatInput
-          value={inputValue}
-          onChange={setInputValue}
-          onSend={handleSend}
-          onPickFile={handlePickFile}
-          onRemoveUpload={removeUpload}
-          uploads={uploads}
-          disabled={isStreaming || inputValue.trim().length === 0}
-        />
+            <ChatInput
+              value={inputValue}
+              onChange={setInputValue}
+              onSend={handleSend}
+              onPickFile={handlePickFile}
+              onRemoveUpload={removeUpload}
+              uploads={uploads}
+              disabled={isStreaming || inputValue.trim().length === 0}
+            />
+          </>
+        )}
       </section>
     </div>
   )

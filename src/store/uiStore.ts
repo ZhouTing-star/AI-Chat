@@ -1,10 +1,14 @@
 import { create } from 'zustand'
 import type { UploadItem } from '../types/chat'
 
+export type AppPage = 'chat' | 'knowledge-base'
+
 interface UIState {
+  page: AppPage
   mobileSidebarOpen: boolean
   inputValue: string
   uploads: UploadItem[]
+  setPage: (page: AppPage) => void
   setMobileSidebarOpen: (open: boolean) => void
   setInputValue: (value: string) => void
   addUploads: (uploads: UploadItem[]) => void
@@ -13,9 +17,11 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
+  page: 'chat',
   mobileSidebarOpen: false,
   inputValue: '',
   uploads: [],
+  setPage: (page) => set({ page }),
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   setInputValue: (value) => set({ inputValue: value }),
   addUploads: (uploads) => {
