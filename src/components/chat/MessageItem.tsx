@@ -1,9 +1,9 @@
-import { memo, useState, type ReactElement } from 'react'
+import { memo, useMemo, useState, type ReactElement } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import remarkGfm from 'remark-gfm'
-import type { ChatMessage, MessageType } from '../../types/chat'
+import type { AnswerMode, ChatMessage, MessageType } from '../../types/chat'
 
 interface MessageItemProps {
   message: ChatMessage
@@ -147,12 +147,113 @@ const messageRenderer: Record<MessageType, (message: ChatMessage) => ReactElemen
   file: renderFileMessage,
 }
 
+const CITATION_SCORE_THRESHOLD = 0.4
+const STRICT_SCORE_THRESHOLD = 0.7
+const CITATION_MAX_COUNT = 5
+const CITATION_PREVIEW_CHARS = 80
+
+interface TransparencyBadge {
+  text: string
+  toneClass: string
+}
+
+function decodeHtmlEntities(text: string): string {
+  if (typeof document === 'undefined') {
+    return text
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = text
+  return textarea.value
+}
+
+function cleanCitationText(raw: string): string {
+  const withoutTags = raw.replace(/<[^>]*>/g, ' ')
+  const decoded = decodeHtmlEntities(withoutTags)
+  return decoded.replace(/\s+/g, ' ').trim()
+}
+
+function shortenText(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text
+  }
+  return `${text.slice(0, limit).trim()}...`
+}
+
+function buildTransparencyBadge(
+  answerMode: AnswerMode,
+  citations: Array<{ score: number }>,
+): TransparencyBadge {
+  const maxScore = citations.reduce((acc, item) => Math.max(acc, item.score), 0)
+  const strictHits = citations.filter((item) => item.score >= STRICT_SCORE_THRESHOLD).length
+
+  if (answerMode === 'strict') {
+    if (strictHits > 0) {
+      return {
+        text: `✅ 基于 ${strictHits} 份资料`,
+        toneClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      }
+    }
+
+    return {
+      text: '❌ 知识库未涵盖',
+      toneClass: 'border-rose-200 bg-rose-50 text-rose-700',
+    }
+  }
+
+  if (answerMode === 'general') {
+    return {
+      text: '🤖 AI 通用知识',
+      toneClass: 'border-slate-200 bg-slate-100 text-slate-700',
+    }
+  }
+
+  if (maxScore >= STRICT_SCORE_THRESHOLD) {
+    return {
+      text: `📚 高度相关 ${(maxScore * 100).toFixed(1)}%`,
+      toneClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    }
+  }
+
+  if (maxScore >= CITATION_SCORE_THRESHOLD) {
+    return {
+      text: `⚠️ 部分相关 ${(maxScore * 100).toFixed(1)}%`,
+      toneClass: 'border-amber-200 bg-amber-50 text-amber-700',
+    }
+  }
+
+  return {
+    text: '💡 AI 通用知识',
+    toneClass: 'border-slate-200 bg-slate-100 text-slate-700',
+  }
+}
+
 function MessageItemComponent({ message }: MessageItemProps) {
   const isUser = message.role === 'user'
   const isStreaming = message.status === 'streaming'
   const type: MessageType = message.type ?? 'text'
   const renderer = messageRenderer[type] ?? renderTextMessage
-  const citations = message.citations ?? []
+  const [citationsPanelOpen, setCitationsPanelOpen] = useState(false)
+  const [highQualityExpanded, setHighQualityExpanded] = useState(false)
+  const [lowQualityExpanded, setLowQualityExpanded] = useState(false)
+
+  const sortedCitations = useMemo(() => {
+    return (message.citations ?? [])
+      .sort((a, b) => b.score - a.score)
+      .slice(0, CITATION_MAX_COUNT)
+      .map((item) => ({
+        ...item,
+        source: cleanCitationText(item.source),
+        content: cleanCitationText(item.content),
+      }))
+  }, [message.citations])
+
+  const highQualityCitations = sortedCitations.filter((item) => item.score >= CITATION_SCORE_THRESHOLD)
+  const lowQualityCitations = sortedCitations.filter((item) => item.score < CITATION_SCORE_THRESHOLD)
+  const answerMode: AnswerMode = message.answerMode ?? 'balanced'
+  const transparencyBadge = buildTransparencyBadge(answerMode, sortedCitations)
+
+  const visibleCitations = highQualityExpanded ? highQualityCitations : highQualityCitations.slice(0, 1)
 
   return (
     <div className={['mb-4 flex', isUser ? 'justify-end' : 'justify-start'].join(' ')}>
@@ -165,21 +266,84 @@ function MessageItemComponent({ message }: MessageItemProps) {
         ].join(' ')}
       >
         {renderer(message)}
-        {citations.length > 0 && (
+        {!isUser && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setCitationsPanelOpen((prev) => !prev)}
+              className={[
+                'rounded-full border px-2.5 py-1 text-[11px] font-medium transition',
+                transparencyBadge.toneClass,
+                sortedCitations.length > 0 ? 'hover:opacity-85' : 'cursor-default',
+              ].join(' ')}
+              disabled={sortedCitations.length === 0}
+            >
+              {transparencyBadge.text}
+            </button>
+          </div>
+        )}
+        {sortedCitations.length > 0 && citationsPanelOpen && (
           <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
-            <p className="mb-1 text-[11px] font-semibold text-slate-600">引用来源</p>
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-slate-600">
+                引用来源（Top-{sortedCitations.length}）
+              </p>
+              {highQualityCitations.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setHighQualityExpanded((prev) => !prev)}
+                  className="text-[11px] font-medium text-sky-600 hover:text-sky-700"
+                >
+                  {highQualityExpanded ? '仅看最高匹配' : '查看全部高质量'}
+                </button>
+              )}
+            </div>
             <div className="space-y-2">
-              {citations.map((item) => (
+              {visibleCitations.map((item, index) => (
                 <div key={item.id} className="rounded border border-slate-200 bg-white p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-medium text-slate-700">{item.source}</span>
+                    <span className="text-[11px] font-medium text-slate-700">
+                      [{index + 1}] {item.source}
+                    </span>
                     <span className="text-[11px] text-emerald-700">
                       {(item.score * 100).toFixed(1)}%
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] leading-5 text-slate-500">{item.content}</p>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                    {shortenText(item.content, CITATION_PREVIEW_CHARS)}
+                  </p>
                 </div>
               ))}
+
+              {lowQualityCitations.length > 0 && (
+                <div className="rounded border border-dashed border-slate-300 bg-white p-2">
+                  <button
+                    type="button"
+                    onClick={() => setLowQualityExpanded((prev) => !prev)}
+                    className="text-[11px] font-medium text-slate-600 hover:text-slate-800"
+                  >
+                    匹配度较低（{lowQualityCitations.length}）
+                  </button>
+
+                  {lowQualityExpanded && (
+                    <div className="mt-2 space-y-2">
+                      {lowQualityCitations.map((item) => (
+                        <div key={item.id} className="rounded border border-slate-200 bg-slate-50 p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-medium text-slate-700">{item.source}</span>
+                            <span className="text-[11px] text-amber-700">
+                              {(item.score * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                            {shortenText(item.content, CITATION_PREVIEW_CHARS)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

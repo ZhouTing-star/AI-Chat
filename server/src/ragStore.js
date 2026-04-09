@@ -302,6 +302,23 @@ function splitTextIntoChunks(text, options = {}) {
   return chunks.filter(Boolean)
 }
 
+function normalizeSearchMode(rawMode) {
+  const mode = String(rawMode ?? '').trim().toLowerCase()
+
+  if (
+    mode === 'strict' ||
+    mode === 'balanced' ||
+    mode === 'general' ||
+    mode === 'vector' ||
+    mode === 'hybrid' ||
+    mode === 'off'
+  ) {
+    return mode
+  }
+
+  return 'balanced'
+}
+
 export function createRagStore(options) {
   const {
     dbFilePath,
@@ -622,11 +639,21 @@ export function createRagStore(options) {
     }
   }
 
-  async function search(kbId, query, topK, mode = 'hybrid') {
+  async function search(kbId, query, topK, mode = 'balanced') {
     const normalizedTopK = Math.max(1, Math.min(Number(topK) || 5, 8))
     const queryText = String(query ?? '').trim()
+    const normalizedMode = normalizeSearchMode(mode)
+    const isVectorOnly = normalizedMode === 'vector'
+    const useHybrid = normalizedMode === 'hybrid' || normalizedMode === 'balanced' || normalizedMode === 'strict'
 
-    if (!queryText || mode === 'off') {
+    const minScore =
+      normalizedMode === 'strict'
+        ? 0.7
+        : normalizedMode === 'balanced'
+          ? 0.4
+          : 0
+
+    if (!queryText || normalizedMode === 'off' || normalizedMode === 'general') {
       return []
     }
 
@@ -646,7 +673,7 @@ export function createRagStore(options) {
       activeDocs.map((item) => [item.id, item.name]),
     )
 
-    if (mode === 'vector' || mode === 'hybrid') {
+    if (isVectorOnly || useHybrid) {
       const queryVector = await embedText(queryText)
       const vectorCandidates = chunksForVectorStmt.all(kbId)
 
@@ -682,7 +709,7 @@ export function createRagStore(options) {
       })
     }
 
-    if (mode === 'hybrid') {
+    if (useHybrid) {
       const matchQuery = normalizeMatchQuery(queryText)
       if (matchQuery) {
         try {
@@ -754,7 +781,7 @@ export function createRagStore(options) {
     const ranked = Array.from(scores.values())
       .map((item) => {
         const score =
-          mode === 'vector'
+          isVectorOnly
             ? item.vectorScore
             : item.vectorScore * 0.72 + item.keywordScore * 0.28
 
@@ -767,6 +794,7 @@ export function createRagStore(options) {
           score,
         }
       })
+      .filter((item) => item.score >= minScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, normalizedTopK)
 

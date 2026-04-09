@@ -23,7 +23,7 @@ interface StreamChatOptions {
   prompt: string
   model: string
   knowledgeBaseId?: string
-  retrievalMode?: 'hybrid' | 'vector' | 'off'
+  retrievalMode?: 'strict' | 'balanced' | 'general' | 'hybrid' | 'vector' | 'off'
   topK?: number
   messages?: StreamContextMessage[]
   token?: string

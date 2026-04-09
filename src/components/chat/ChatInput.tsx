@@ -1,22 +1,48 @@
 import { useRef } from 'react'
 import { UploadPreview } from './UploadPreview'
-import type { UploadItem } from '../../types/chat'
+import type { AnswerMode, UploadItem } from '../../types/chat'
 
 interface ChatInputProps {
   value: string
   disabled?: boolean
   uploads: UploadItem[]
+  answerMode: AnswerMode
   onChange: (value: string) => void
+  onChangeAnswerMode: (mode: AnswerMode) => void
   onSend: () => void
   onPickFile: (files: FileList) => void
   onRemoveUpload: (uploadId: string) => void
 }
 
+const MODE_OPTIONS: Array<{
+  value: AnswerMode
+  label: string
+  helper: string
+}> = [
+  {
+    value: 'strict',
+    label: 'Shield 严格',
+    helper: '仅知识库，缺失时拒答',
+  },
+  {
+    value: 'balanced',
+    label: 'Scale 平衡',
+    helper: '优先知识库，不足时补充',
+  },
+  {
+    value: 'general',
+    label: 'Sparkles 通用',
+    helper: '跳过知识库，纯 AI 回答',
+  },
+]
+
 export function ChatInput({
   value,
   disabled = false,
   uploads,
+  answerMode,
   onChange,
+  onChangeAnswerMode,
   onSend,
   onPickFile,
   onRemoveUpload,
@@ -26,6 +52,30 @@ export function ChatInput({
   return (
     <div className="border-t border-slate-200 bg-white px-4 py-3 lg:px-6 lg:py-4">
       <UploadPreview uploads={uploads} onRemoveUpload={onRemoveUpload} />
+
+      <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-2">
+        <div className="grid gap-2 md:grid-cols-3">
+          {MODE_OPTIONS.map((option) => {
+            const active = option.value === answerMode
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onChangeAnswerMode(option.value)}
+                className={[
+                  'rounded-lg border px-3 py-2 text-left transition',
+                  active
+                    ? 'border-sky-400 bg-sky-50 text-sky-800'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                ].join(' ')}
+              >
+                <p className="text-xs font-semibold">{option.label}</p>
+                <p className="mt-0.5 text-[11px] text-slate-500">{option.helper}</p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       <div className="flex items-end gap-2">
         <input

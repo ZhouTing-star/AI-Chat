@@ -1,73 +1,67 @@
-# React + TypeScript + Vite
+# AI Chat Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+一个前后端分离的 AI 聊天平台 MVP，支持：
 
-Currently, two official plugins are available:
+- 多会话聊天
+- SSE 流式输出
+- 本地知识库管理（上传、启停、删除、重建索引）
+- RAG 检索增强回答（hybrid/vector/off）
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 项目结构
 
-## React Compiler
+- `src/`: 前端（React + TypeScript + Vite）
+- `server/`: 后端（Express + SQLite + RAG）
+- `docs/`: 项目文档
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 快速开始
 
-## Expanding the ESLint configuration
+### 1. 安装依赖
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+项目根目录：
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+后端目录：
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd server
+npm install
 ```
+
+### 2. 配置环境变量
+
+在 `server/` 下复制模板并填写密钥：
+
+```bash
+cp .env.example .env
+```
+
+至少需要配置 LLM API Key（或兼容的 `ZHIPU_*` / `QWEN_*` 变量）。
+
+### 3. 启动服务
+
+后端：
+
+```bash
+npm run dev:server
+```
+
+前端：
+
+```bash
+npm run dev
+```
+
+## 核心文档
+
+- 完整项目梳理：`docs/project-overview.md`
+- 后端说明：`server/README.md`
+
+## 常用脚本
+
+- `npm run dev`：启动前端开发服务
+- `npm run dev:server`：启动后端服务
+- `npm run build`：构建前端
+- `npm run lint`：ESLint 检查

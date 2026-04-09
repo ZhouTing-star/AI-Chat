@@ -9,6 +9,7 @@ interface SessionState {
   setActiveSessionId: (sessionId: string) => void
   createSession: (model?: string) => ChatSession
   updateSessionPreview: (sessionId: string, preview: string) => void
+  updateSessionAnswerMode: (sessionId: string, answerMode: ChatSession['answerMode']) => void
 }
 
 function nowTimeLabel(): string {
@@ -32,6 +33,7 @@ export const useSessionStore = create(
           updatedAt: nowTimeLabel(),
           preview: '开始新的提问。',
           model,
+          answerMode: 'balanced',
         }
         set((state: SessionState) => ({
           sessions: [session, ...state.sessions],
@@ -52,9 +54,38 @@ export const useSessionStore = create(
           ),
         }))
       },
+      updateSessionAnswerMode: (sessionId: string, answerMode: ChatSession['answerMode']) => {
+        set((state: SessionState) => ({
+          sessions: state.sessions.map((session: ChatSession) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  answerMode,
+                  updatedAt: nowTimeLabel(),
+                }
+              : session,
+          ),
+        }))
+      },
     }),
     {
       name: 'session-store',
+      merge: (persistedState: unknown, currentState: SessionState): SessionState => {
+        const typed = (persistedState ?? {}) as Partial<SessionState>
+        const sessions = Array.isArray(typed.sessions)
+          ? typed.sessions.map((session) => ({
+              ...session,
+              answerMode: session.answerMode ?? 'balanced',
+            }))
+          : currentState.sessions
+
+        return {
+          ...currentState,
+          ...typed,
+          sessions,
+          activeSessionId: typed.activeSessionId ?? currentState.activeSessionId,
+        }
+      },
       partialize: (state: SessionState) => ({
         sessions: state.sessions,
         activeSessionId: state.activeSessionId,

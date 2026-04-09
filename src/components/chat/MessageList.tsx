@@ -70,6 +70,8 @@ export function MessageList({ messages }: MessageListProps) {
   const listRef = useListRef(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const shouldFollowRef = useRef(true)
+  const previousScrollTopRef = useRef(0)
+  const programmaticScrollingRef = useRef(false)
   const [rowSizes, setRowSizes] = useState<Record<number, number>>({})
   const [listHeight, setListHeight] = useState(0)
   const [renderRange, setRenderRange] = useState({ start: 0, stop: -1 })
@@ -129,7 +131,25 @@ export function MessageList({ messages }: MessageListProps) {
     }
 
     const onScroll = () => {
-      shouldFollowRef.current = isNearBottom(element)
+      if (programmaticScrollingRef.current) {
+        previousScrollTopRef.current = element.scrollTop
+        return
+      }
+
+      const currentTop = element.scrollTop
+      const delta = currentTop - previousScrollTopRef.current
+      previousScrollTopRef.current = currentTop
+
+      // 用户向上查看历史时，立即关闭自动滚动，避免被新消息打断。
+      if (delta < 0) {
+        shouldFollowRef.current = false
+        return
+      }
+
+      // 用户回到底部附近时，再恢复自动跟随。
+      if (isNearBottom(element)) {
+        shouldFollowRef.current = true
+      }
     }
 
     onScroll()
@@ -149,10 +169,15 @@ export function MessageList({ messages }: MessageListProps) {
     }
 
     const scrollToBottom = debounce(() => {
+      programmaticScrollingRef.current = true
       listRef.current?.scrollToRow({
         index: messages.length - 1,
         align: 'end',
         behavior: 'auto',
+      })
+
+      window.requestAnimationFrame(() => {
+        programmaticScrollingRef.current = false
       })
     }, 24)
 

@@ -412,6 +412,21 @@ function normalizeModel(rawModel) {
   return rawModel
 }
 
+function normalizeChatRetrievalMode(rawMode) {
+  const mode = String(rawMode ?? '').trim().toLowerCase()
+
+  if (mode === 'strict' || mode === 'balanced' || mode === 'general') {
+    return mode
+  }
+
+  // 兼容旧参数：off 等价通用，hybrid/vector 等价平衡。
+  if (mode === 'off') {
+    return 'general'
+  }
+
+  return 'balanced'
+}
+
 const ALLOWED_ROLES = new Set(['user', 'assistant', 'system'])
 
 function truncateContent(content, limit) {
@@ -509,12 +524,9 @@ app.post('/api/chat/stream', async (req, res) => {
   const prompt = String(req.body?.prompt ?? '')
   const model = normalizeModel(req.body?.model)
   const knowledgeBaseId = String(req.body?.knowledgeBaseId ?? '')
-  const retrievalModeRaw = String(req.body?.retrievalMode ?? 'hybrid')
+  const retrievalModeRaw = String(req.body?.retrievalMode ?? 'balanced')
   const topK = parsePositiveInt(req.body?.topK, 4)
-  const retrievalMode =
-    retrievalModeRaw === 'vector' || retrievalModeRaw === 'off'
-      ? retrievalModeRaw
-      : 'hybrid'
+  const retrievalMode = normalizeChatRetrievalMode(retrievalModeRaw)
   let messages = normalizeMessages(req.body?.messages, prompt)
   let citations = []
 
@@ -536,7 +548,10 @@ app.post('/api/chat/stream', async (req, res) => {
     return
   }
 
-  if (knowledgeBaseId && retrievalMode !== 'off') {
+  const isStrictMode = retrievalMode === 'strict'
+
+  // 通用模式直接跳过 RAG 检索，降低后端开销。
+  if (knowledgeBaseId && retrievalMode !== 'general') {
     try {
       citations = await ragStore.search(knowledgeBaseId, prompt, topK, retrievalMode)
       const ragPrompt = buildRagSystemPrompt(citations)
@@ -552,6 +567,27 @@ app.post('/api/chat/stream', async (req, res) => {
     } catch (error) {
       console.error('[rag] retrieve failed:', error)
     }
+  }
+
+  // 严格模式下，知识库缺失命中时必须拒答，避免模型回退到通用知识作答。
+  if (isStrictMode && citations.length === 0) {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders()
+    }
+
+    const refusalText = knowledgeBaseId
+      ? '当前为严格模式，但知识库未检索到足够相关的资料（阈值 0.7）。请补充知识库内容或切换到平衡/通用模式后再试。'
+      : '当前为严格模式，但未选择可用知识库，无法基于资料回答。请先启用知识库或切换到平衡/通用模式。'
+
+    writeSse(res, { delta: refusalText })
+    writeSse(res, { done: true }, 'done')
+    res.end()
+    return
   }
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')

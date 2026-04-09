@@ -9,12 +9,13 @@ import { useChatStore } from './store/chatStore'
 import { useSessionStore } from './store/sessionStore'
 import { useThemeStore } from './store/themeStore'
 import { useUIStore } from './store/uiStore'
-import type { ChatMessage, UploadItem } from './types/chat'
+import type { AnswerMode, ChatMessage, UploadItem } from './types/chat'
 
 interface StreamTaskMeta {
   assistantId: string
   prompt: string
   model: string
+  answerMode: AnswerMode
   baseContext: ChatMessage[]
 }
 
@@ -44,6 +45,7 @@ function App() {
   const setActiveSessionId = useSessionStore((state) => state.setActiveSessionId)
   const createSession = useSessionStore((state) => state.createSession)
   const updateSessionPreview = useSessionStore((state) => state.updateSessionPreview)
+  const updateSessionAnswerMode = useSessionStore((state) => state.updateSessionAnswerMode)
 
   const messagesBySession = useChatStore((state) => state.messagesBySession)
   const ensureSession = useChatStore((state) => state.ensureSession)
@@ -66,7 +68,6 @@ function App() {
   const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen)
   const page = useUIStore((state) => state.page)
   const activeKnowledgeBaseId = useUIStore((state) => state.activeKnowledgeBaseId)
-  const retrievalMode = useUIStore((state) => state.retrievalMode)
   const inputValue = useUIStore((state) => state.inputValue)
   const uploads = useUIStore((state) => state.uploads)
   const setPage = useUIStore((state) => state.setPage)
@@ -81,6 +82,7 @@ function App() {
   }, [activeSessionId, sessions])
 
   const activeMessages = messagesBySession.get(activeSessionId) ?? []
+  const activeAnswerMode: AnswerMode = activeSession?.answerMode ?? 'balanced'
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
@@ -102,6 +104,7 @@ function App() {
     sessionId: string,
     prompt: string,
     model: string,
+    answerMode: AnswerMode,
     contextMessages: ChatMessage[],
     assistantIdOverride?: string,
   ) => {
@@ -122,6 +125,7 @@ function App() {
         createdAt: nowTimeLabel(),
         status: 'streaming',
         citations: [],
+        answerMode,
       })
     }
 
@@ -131,6 +135,7 @@ function App() {
       assistantId,
       prompt,
       model,
+      answerMode,
       baseContext: contextMessages,
     })
     setCanRegenerate(sessionId, true)
@@ -143,7 +148,7 @@ function App() {
       prompt,
       model,
       knowledgeBaseId: activeKnowledgeBaseId,
-      retrievalMode,
+      retrievalMode: answerMode,
       topK: 4,
       messages: contextMessages
         .filter(
@@ -263,6 +268,7 @@ function App() {
       activeSessionId,
       resumePrompt,
       task.model,
+      task.answerMode,
       resumeContext,
       task.assistantId,
     )
@@ -284,6 +290,7 @@ function App() {
       activeSessionId,
       task.prompt,
       task.model,
+      task.answerMode,
       task.baseContext,
     )
   }
@@ -346,7 +353,13 @@ function App() {
     updateSessionPreview(activeSessionId, prompt)
     setInputValue('')
     const contextMessages = [...activeMessages, message]
-    startStreamReply(activeSessionId, prompt, activeSession.model, contextMessages)
+    startStreamReply(
+      activeSessionId,
+      prompt,
+      activeSession.model,
+      activeAnswerMode,
+      contextMessages,
+    )
   }
 
   const handleClearMessages = () => {
@@ -417,7 +430,9 @@ function App() {
 
             <ChatInput
               value={inputValue}
+              answerMode={activeAnswerMode}
               onChange={setInputValue}
+              onChangeAnswerMode={(mode) => updateSessionAnswerMode(activeSessionId, mode)}
               onSend={handleSend}
               onPickFile={handlePickFile}
               onRemoveUpload={removeUpload}

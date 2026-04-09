@@ -7,6 +7,7 @@ export const mockSessions: ChatSession[] = [
     updatedAt: '09:38',
     preview: '我先帮你梳理产品 MVP 范围。',
     model: 'glm-4-flash',
+    answerMode: 'balanced',
   },
   {
     id: 's-2',
@@ -14,6 +15,7 @@ export const mockSessions: ChatSession[] = [
     updatedAt: '昨天',
     preview: '建议先做消息列表虚拟滚动。',
     model: 'glm-4-flash',
+    answerMode: 'balanced',
   },
   {
     id: 's-3',
@@ -21,6 +23,7 @@ export const mockSessions: ChatSession[] = [
     updatedAt: '周五',
     preview: '已完成 zh-CN 与 en-US 对照。',
     model: 'glm-4-flash',
+    answerMode: 'balanced',
   },
 ]
 

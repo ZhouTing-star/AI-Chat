@@ -4,6 +4,8 @@ export type MessageStatus = 'done' | 'streaming' | 'paused'
 
 export type MessageType = 'text' | 'image' | 'file'
 
+export type AnswerMode = 'strict' | 'balanced' | 'general'
+
 export interface MessageCitation {
   id: string
   source: string
@@ -27,6 +29,7 @@ export interface ChatMessage {
   fileName?: string      // 文件名（type=file时使用）
   fileUrl?: string       // 文件下载地址（type=file时使用）
   citations?: MessageCitation[] // RAG 命中引用来源
+  answerMode?: AnswerMode // 该条回答使用的模式
 }
 
 /**
@@ -39,6 +42,7 @@ export interface ChatSession {
   updatedAt: string // 最后更新时间
   preview: string   // 会话预览（显示最后一条消息）
   model: string     // 该会话使用的AI模型名称
+  answerMode: AnswerMode // 会话回答模式（严格/平衡/通用）
 }
 
 /**
