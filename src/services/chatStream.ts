@@ -25,6 +25,7 @@ interface StreamChatOptions {
   knowledgeBaseId?: string
   retrievalMode?: 'strict' | 'balanced' | 'general' | 'hybrid' | 'vector' | 'off'
   topK?: number
+  attachmentDocIds?: string[]
   messages?: StreamContextMessage[]
   token?: string
   onChunk: (chunk: string) => void
@@ -107,6 +108,7 @@ export function streamChatReply(options: StreamChatOptions): () => void {
     knowledgeBaseId,
     retrievalMode,
     topK,
+    attachmentDocIds = [],
     messages = [],
     token,
     onChunk,
@@ -208,6 +210,7 @@ export function streamChatReply(options: StreamChatOptions): () => void {
           knowledgeBaseId,
           retrievalMode,
           topK,
+          attachmentDocIds,
           messages,
         }),
         signal: controller.signal,

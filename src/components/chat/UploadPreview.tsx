@@ -50,8 +50,24 @@ export function UploadPreview({ uploads, onRemoveUpload }: UploadPreviewProps) {
 
           <div className="flex items-center justify-between text-[11px] text-slate-500">
             <span>{formatFileSize(upload.size)}</span>
-            <span>{upload.status}</span>
+            <span>
+              {upload.status === 'queued'
+                ? '待上传'
+                : upload.status === 'uploading'
+                  ? `${upload.progress}%`
+                  : upload.status === 'done'
+                    ? '已解析'
+                    : '上传失败'}
+            </span>
           </div>
+
+          {upload.note && upload.status === 'done' && (
+            <p className="mt-1 text-[11px] text-amber-700">{upload.note}</p>
+          )}
+
+          {upload.error && (
+            <p className="mt-1 text-[11px] text-rose-600">{upload.error}</p>
+          )}
         </div>
       ))}
     </div>

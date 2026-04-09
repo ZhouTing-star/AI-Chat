@@ -10,6 +10,12 @@ import { useSessionStore } from './store/sessionStore'
 import { useThemeStore } from './store/themeStore'
 import { useUIStore } from './store/uiStore'
 import type { AnswerMode, ChatMessage, UploadItem } from './types/chat'
+import {
+  createAttachmentFromFile,
+  formatSize,
+  isFileTypeAllowed,
+  MAX_FILE_SIZE,
+} from './utils/attachmentParser'
 
 interface StreamTaskMeta {
   assistantId: string
@@ -31,7 +37,6 @@ function App() {
   const streamClosersRef = useRef<Map<string, () => void>>(new Map())
   const streamTasksRef = useRef<Map<string, StreamTaskMeta>>(new Map())
   const [regenerateFlags, setRegenerateFlags] = useState<Record<string, boolean>>({})
-  const uploadTimersRef = useRef<Set<number>>(new Set())
   const setCanRegenerate = (sessionId: string, canRegenerate: boolean) => {
     setRegenerateFlags((prev) => ({
       ...prev,
@@ -82,6 +87,14 @@ function App() {
   }, [activeSessionId, sessions])
 
   const activeMessages = messagesBySession.get(activeSessionId) ?? []
+  const activeUploads = useMemo(
+    () => uploads.filter((item) => item.sessionId === activeSessionId),
+    [uploads, activeSessionId],
+  )
+  const activeUploadsUploading = useMemo(
+    () => activeUploads.some((item) => item.status === 'queued' || item.status === 'uploading'),
+    [activeUploads],
+  )
   const activeAnswerMode: AnswerMode = activeSession?.answerMode ?? 'balanced'
 
   useEffect(() => {
@@ -90,13 +103,10 @@ function App() {
 
   useEffect(() => {
     const streamClosers = streamClosersRef.current
-    const uploadTimers = uploadTimersRef.current
 
     return () => {
       streamClosers.forEach((close) => close())
-      uploadTimers.forEach((timerId) => window.clearInterval(timerId))
       streamClosers.clear()
-      uploadTimers.clear()
     }
   }, [])
 
@@ -302,64 +312,117 @@ function App() {
   }
 
   const handlePickFile = (files: FileList) => {
-    const queuedItems: UploadItem[] = Array.from(files).map((file) => ({
+    const fileList = Array.from(files)
+    const queuedItems: UploadItem[] = fileList.map((file) => ({
       id: crypto.randomUUID(),
+      sessionId: activeSessionId,
       name: file.name,
       size: file.size,
+      mimeType: file.type || 'unknown',
       progress: 0,
       status: 'queued',
     }))
 
     addUploads(queuedItems)
 
-    queuedItems.forEach((item) => {
-      let progress = 0
+    void Promise.allSettled(
+      fileList.map(async (file, index) => {
+        const uploadId = queuedItems[index]?.id
+        if (!uploadId) {
+          return
+        }
 
-      // 当前是上传进度占位逻辑，后续会替换为真实分片上传回调。
-      const timer = window.setInterval(() => {
-        progress = Math.min(progress + 20, 100)
-        updateUpload(item.id, {
-          progress,
-          status: progress >= 100 ? 'done' : 'uploading',
+        if (!isFileTypeAllowed(file)) {
+          updateUpload(uploadId, {
+            status: 'failed',
+            error: '文件类型不支持，仅允许 txt/md/csv/json/log/pdf/docx。',
+          })
+          return
+        }
+
+        if (file.size > MAX_FILE_SIZE) {
+          updateUpload(uploadId, {
+            status: 'failed',
+            error: `文件过大（${formatSize(file.size)}），上限 ${formatSize(MAX_FILE_SIZE)}。`,
+          })
+          return
+        }
+
+        updateUpload(uploadId, {
+          status: 'uploading',
+          progress: 15,
+          error: undefined,
         })
 
-        if (progress >= 100) {
-          window.clearInterval(timer)
-          uploadTimersRef.current.delete(timer)
-        }
-      }, 160)
+        try {
+          const parsed = await createAttachmentFromFile(file)
 
-      uploadTimersRef.current.add(timer)
-    })
+          updateUpload(uploadId, {
+            status: 'done',
+            progress: 100,
+            body: parsed.body,
+            note: parsed.note,
+            mimeType: parsed.mimeType,
+            error: undefined,
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '上传失败'
+          updateUpload(uploadId, {
+            status: 'failed',
+            error: message,
+          })
+        }
+      }),
+    )
   }
 
   const handleSend = () => {
     const prompt = inputValue.trim()
+    const readyUploads = activeUploads.filter((item) => item.status === 'done')
+    const attachmentsText = readyUploads
+      .map((item, index) => {
+        const body = String(item.body ?? '').trim()
+        if (!body) {
+          return ''
+        }
 
-    if (!prompt || !activeSession || isStreaming) {
+        const noteLine = item.note ? `\n解析说明: ${item.note}` : ''
+        return `【附件 ${index + 1}】\n文件名: ${item.name}\n文件大小: ${formatSize(item.size)}${noteLine}\n正文:\n${body}`
+      })
+      .filter(Boolean)
+      .join('\n\n')
+
+    if ((!prompt && !attachmentsText) || !activeSession || isStreaming || activeUploadsUploading) {
       return
     }
+
+    const displayContent = prompt || '请结合我上传的附件内容回答。'
+    const promptWithAttachments = attachmentsText
+      ? `${displayContent}\n\n以下是我上传的附件解析内容，请结合它们回答：\n${attachmentsText}`
+      : displayContent
 
     const message: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: prompt,
+      content: displayContent,
       createdAt: nowTimeLabel(),
       status: 'done',
     }
 
     // 先插入用户消息，再触发 AI 流式回复，保持与真实链路一致。
     pushMessage(activeSessionId, message)
-    updateSessionPreview(activeSessionId, prompt)
+    updateSessionPreview(activeSessionId, displayContent)
     setInputValue('')
-    const contextMessages = [...activeMessages, message]
+    const modelContextMessages = [...activeMessages, { ...message, content: promptWithAttachments }]
     startStreamReply(
       activeSessionId,
-      prompt,
+      promptWithAttachments,
       activeSession.model,
       activeAnswerMode,
-      contextMessages,
+      modelContextMessages,
     )
+
+    readyUploads.forEach((item) => removeUpload(item.id))
   }
 
   const handleClearMessages = () => {
@@ -436,8 +499,8 @@ function App() {
               onSend={handleSend}
               onPickFile={handlePickFile}
               onRemoveUpload={removeUpload}
-              uploads={uploads}
-              disabled={isStreaming || inputValue.trim().length === 0}
+              uploads={activeUploads}
+              disabled={isStreaming || activeUploadsUploading || inputValue.trim().length === 0}
             />
           </>
         )}

@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { UploadPreview } from './UploadPreview'
 import type { AnswerMode, UploadItem } from '../../types/chat'
+import { ACCEPT_ATTRIBUTE } from '../../utils/attachmentParser'
 
 interface ChatInputProps {
   value: string
@@ -82,6 +83,7 @@ export function ChatInput({
           ref={fileRef}
           type="file"
           multiple
+          accept={ACCEPT_ATTRIBUTE}
           className="hidden"
           onChange={(event) => {
             const files = event.target.files

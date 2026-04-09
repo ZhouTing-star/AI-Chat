@@ -61,8 +61,13 @@ export type UploadStatus =
  */
 export interface UploadItem {
   id: string        // 文件唯一ID
+  sessionId: string // 所属会话ID
   name: string      // 文件名
   size: number      // 文件大小（字节）
+  mimeType?: string // 文件MIME类型
   progress: number  // 上传进度 0~100
   status: UploadStatus // 当前上传状态
+  body?: string // 解析后的正文（用于拼接到发送消息）
+  note?: string // 解析提示（截断/失败说明）
+  error?: string // 上传失败原因
 }

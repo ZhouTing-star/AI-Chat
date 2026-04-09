@@ -639,7 +639,7 @@ export function createRagStore(options) {
     }
   }
 
-  async function search(kbId, query, topK, mode = 'balanced') {
+  async function search(kbId, query, topK, mode = 'balanced', docIdWhitelist = []) {
     const normalizedTopK = Math.max(1, Math.min(Number(topK) || 5, 8))
     const queryText = String(query ?? '').trim()
     const normalizedMode = normalizeSearchMode(mode)
@@ -662,22 +662,47 @@ export function createRagStore(options) {
       return []
     }
 
-    const activeDocs = docsByKbStmt.all(kbId).filter((item) => item.is_active === 1)
+    const whitelist = Array.isArray(docIdWhitelist)
+      ? new Set(docIdWhitelist.map((item) => String(item ?? '').trim()).filter(Boolean))
+      : new Set()
+
+    const activeDocs = docsByKbStmt
+      .all(kbId)
+      .filter((item) => item.is_active === 1)
+      .filter((item) => whitelist.size === 0 || whitelist.has(item.id))
+
     if (activeDocs.length === 0) {
       return []
     }
 
     const scores = new Map()
     const activeDocIds = activeDocs.map((item) => item.id)
+    const activeDocIdSet = new Set(activeDocIds)
     const activeDocNameById = new Map(
       activeDocs.map((item) => [item.id, item.name]),
     )
 
     if (isVectorOnly || useHybrid) {
-      const queryVector = await embedText(queryText)
-      const vectorCandidates = chunksForVectorStmt.all(kbId)
+      let queryVector = []
+      try {
+        queryVector = await embedText(queryText)
+      } catch {
+        queryVector = []
+      }
+
+      const vectorCandidates = chunksForVectorStmt
+        .all(kbId)
+        .filter((item) => activeDocIdSet.has(item.doc_id))
+
+      if (queryVector.length === 0 && isVectorOnly) {
+        return []
+      }
 
       vectorCandidates.forEach((item) => {
+        if (queryVector.length === 0) {
+          return
+        }
+
         if (!item.vector_json) {
           return
         }
@@ -753,7 +778,9 @@ export function createRagStore(options) {
             scores.set(chunk.id, record)
           })
         } catch {
-          const fallbackChunks = chunksForVectorStmt.all(kbId)
+          const fallbackChunks = chunksForVectorStmt
+            .all(kbId)
+            .filter((chunk) => activeDocIdSet.has(chunk.doc_id))
           const tokens = queryText.toLowerCase().split(/\s+/).filter(Boolean)
 
           fallbackChunks.forEach((chunk) => {
@@ -797,6 +824,36 @@ export function createRagStore(options) {
       .filter((item) => item.score >= minScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, normalizedTopK)
+
+    // 在会话附件限定场景中，若平衡模式检索分数都不达标，
+    // 兜底返回附件正文片段，避免出现“无法访问文档”的错误体验。
+    if (ranked.length === 0 && normalizedMode === 'balanced' && whitelist.size > 0) {
+      const escapedKbId = kbId.replace(/'/g, "''")
+      const escapedDocIds = activeDocIds
+        .map((id) => `'${id.replace(/'/g, "''")}'`)
+        .join(',')
+      const fallbackSql = `
+        SELECT id, kb_id, doc_id, source, content
+        FROM chunks
+        WHERE kb_id = '${escapedKbId}'
+          AND doc_id IN (${escapedDocIds})
+        ORDER BY id ASC
+        LIMIT ${normalizedTopK}
+      `
+
+      const fallback = db.prepare(fallbackSql).all().map((item) => ({
+        id: item.id,
+        kbId: item.kb_id,
+        docId: item.doc_id,
+        source: normalizeSourceLabel(item.source, activeDocNameById.get(item.doc_id)),
+        content: item.content,
+        score: 0.41,
+      }))
+
+      if (fallback.length > 0) {
+        return fallback
+      }
+    }
 
     return ranked
   }

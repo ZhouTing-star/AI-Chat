@@ -5,12 +5,9 @@ import axios from 'axios'
 import { createParser } from 'eventsource-parser'
 import multer from 'multer'
 import mammoth from 'mammoth'
-import { createRequire } from 'node:module'
+import { PDFParse } from 'pdf-parse'
 import { createEmbeddingClient } from './embeddingClient.js'
 import { createRagStore } from './ragStore.js'
-
-const require = createRequire(import.meta.url)
-const pdfParse = require('pdf-parse')
 
 dotenv.config()
 
@@ -109,6 +106,19 @@ function buildRagSystemPrompt(results) {
   return `以下是检索到的参考资料，请优先基于资料回答；若资料不足请明确说明：\n\n${lines.join('\n\n')}`
 }
 
+async function extractTextFromPdf(buffer) {
+  const parser = new PDFParse({ data: buffer })
+
+  try {
+    const result = await parser.getText()
+    return String(result?.text ?? '').trim()
+  } finally {
+    if (typeof parser.destroy === 'function') {
+      await parser.destroy().catch(() => {})
+    }
+  }
+}
+
 async function extractTextFromUpload(file) {
   if (!file || !Buffer.isBuffer(file.buffer)) {
     throw new Error('上传文件无效。')
@@ -129,8 +139,7 @@ async function extractTextFromUpload(file) {
 
   if (name.endsWith('.pdf') || mime.includes('application/pdf')) {
     try {
-      const parsed = await pdfParse(file.buffer)
-      const text = String(parsed?.text ?? '').trim()
+      const text = await extractTextFromPdf(file.buffer)
       if (text) {
         return text
       }
@@ -519,6 +528,16 @@ function normalizeMessages(rawMessages, fallbackPrompt) {
   return []
 }
 
+function normalizeAttachmentDocIds(rawDocIds) {
+  if (!Array.isArray(rawDocIds)) {
+    return []
+  }
+
+  return rawDocIds
+    .map((item) => String(item ?? '').trim())
+    .filter((item) => item.length > 0)
+}
+
 app.post('/api/chat/stream', async (req, res) => {
   const sessionId = String(req.body?.sessionId ?? '')
   const prompt = String(req.body?.prompt ?? '')
@@ -526,6 +545,7 @@ app.post('/api/chat/stream', async (req, res) => {
   const knowledgeBaseId = String(req.body?.knowledgeBaseId ?? '')
   const retrievalModeRaw = String(req.body?.retrievalMode ?? 'balanced')
   const topK = parsePositiveInt(req.body?.topK, 4)
+  const attachmentDocIds = normalizeAttachmentDocIds(req.body?.attachmentDocIds)
   const retrievalMode = normalizeChatRetrievalMode(retrievalModeRaw)
   let messages = normalizeMessages(req.body?.messages, prompt)
   let citations = []
@@ -553,7 +573,13 @@ app.post('/api/chat/stream', async (req, res) => {
   // 通用模式直接跳过 RAG 检索，降低后端开销。
   if (knowledgeBaseId && retrievalMode !== 'general') {
     try {
-      citations = await ragStore.search(knowledgeBaseId, prompt, topK, retrievalMode)
+      citations = await ragStore.search(
+        knowledgeBaseId,
+        prompt,
+        topK,
+        retrievalMode,
+        attachmentDocIds,
+      )
       const ragPrompt = buildRagSystemPrompt(citations)
       if (ragPrompt) {
         messages = applyContextLimits([
