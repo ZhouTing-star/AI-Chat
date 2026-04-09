@@ -3,6 +3,12 @@ interface StreamPayload {
   content?: string
   text?: string
   done?: boolean
+  citations?: Array<{
+    id: string
+    source: string
+    content: string
+    score: number
+  }>
   event?: string
   error?: string | { message?: string }
 }
@@ -16,9 +22,20 @@ interface StreamChatOptions {
   sessionId: string
   prompt: string
   model: string
+  knowledgeBaseId?: string
+  retrievalMode?: 'hybrid' | 'vector' | 'off'
+  topK?: number
   messages?: StreamContextMessage[]
   token?: string
   onChunk: (chunk: string) => void
+  onCitations?: (
+    citations: Array<{
+      id: string
+      source: string
+      content: string
+      score: number
+    }>,
+  ) => void
   onDone: () => void
   onError: (error: string) => void
 }
@@ -37,7 +54,17 @@ function resolveApiUrl(path: string): URL {
   return new URL(path, window.location.origin)
 }
 
-function parseData(data: string): { chunk?: string; done?: boolean; error?: string } {
+function parseData(data: string): {
+  chunk?: string
+  done?: boolean
+  error?: string
+  citations?: Array<{
+    id: string
+    source: string
+    content: string
+    score: number
+  }>
+} {
   const trimmed = data.trim()
 
   if (!trimmed) {
@@ -62,6 +89,10 @@ function parseData(data: string): { chunk?: string; done?: boolean; error?: stri
     const chunk = payload.delta ?? payload.content ?? payload.text
     const done = payload.done || payload.event === 'done'
 
+    if (Array.isArray(payload.citations) && payload.citations.length > 0) {
+      return { citations: payload.citations, done }
+    }
+
     return { chunk, done }
   } catch {
     return { chunk: trimmed }
@@ -69,7 +100,20 @@ function parseData(data: string): { chunk?: string; done?: boolean; error?: stri
 }
 
 export function streamChatReply(options: StreamChatOptions): () => void {
-  const { sessionId, prompt, model, messages = [], token, onChunk, onDone, onError } = options
+  const {
+    sessionId,
+    prompt,
+    model,
+    knowledgeBaseId,
+    retrievalMode,
+    topK,
+    messages = [],
+    token,
+    onChunk,
+    onCitations,
+    onDone,
+    onError,
+  } = options
 
   const url = resolveApiUrl('/api/chat/stream')
 
@@ -142,6 +186,10 @@ export function streamChatReply(options: StreamChatOptions): () => void {
       onChunk(result.chunk)
     }
 
+    if (Array.isArray(result.citations) && result.citations.length > 0) {
+      onCitations?.(result.citations)
+    }
+
     if (result.done) {
       notifyDone()
       close()
@@ -157,6 +205,9 @@ export function streamChatReply(options: StreamChatOptions): () => void {
           sessionId,
           prompt,
           model,
+          knowledgeBaseId,
+          retrievalMode,
+          topK,
           messages,
         }),
         signal: controller.signal,

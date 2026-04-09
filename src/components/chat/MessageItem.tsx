@@ -152,6 +152,7 @@ function MessageItemComponent({ message }: MessageItemProps) {
   const isStreaming = message.status === 'streaming'
   const type: MessageType = message.type ?? 'text'
   const renderer = messageRenderer[type] ?? renderTextMessage
+  const citations = message.citations ?? []
 
   return (
     <div className={['mb-4 flex', isUser ? 'justify-end' : 'justify-start'].join(' ')}>
@@ -164,6 +165,24 @@ function MessageItemComponent({ message }: MessageItemProps) {
         ].join(' ')}
       >
         {renderer(message)}
+        {citations.length > 0 && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
+            <p className="mb-1 text-[11px] font-semibold text-slate-600">引用来源</p>
+            <div className="space-y-2">
+              {citations.map((item) => (
+                <div key={item.id} className="rounded border border-slate-200 bg-white p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-slate-700">{item.source}</span>
+                    <span className="text-[11px] text-emerald-700">
+                      {(item.score * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500">{item.content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {isStreaming && (
           <span className="mt-1 inline-flex h-2 w-12 items-center gap-1" aria-label="AI 正在生成">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />

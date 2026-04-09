@@ -3,6 +3,14 @@ import cors from 'cors'
 import express from 'express'
 import axios from 'axios'
 import { createParser } from 'eventsource-parser'
+import multer from 'multer'
+import mammoth from 'mammoth'
+import { createRequire } from 'node:module'
+import { createEmbeddingClient } from './embeddingClient.js'
+import { createRagStore } from './ragStore.js'
+
+const require = createRequire(import.meta.url)
+const pdfParse = require('pdf-parse')
 
 dotenv.config()
 
@@ -45,6 +53,10 @@ const providerApiKeyPrefix =
   process.env.ZHIPU_API_KEY_PREFIX ??
   process.env.QWEN_API_KEY_PREFIX ??
   'Bearer'
+const embeddingPath = process.env.LLM_EMBEDDING_PATH ?? 'embeddings'
+const embeddingModel = process.env.LLM_EMBEDDING_MODEL ?? 'embedding-3'
+const ragDbPath = process.env.RAG_DB_PATH ?? './data/rag.sqlite'
+const ragMaxUploadMb = parsePositiveInt(process.env.RAG_MAX_UPLOAD_MB, 30)
 
 function parsePositiveInt(raw, fallback) {
   const n = Number(raw)
@@ -54,6 +66,134 @@ function parsePositiveInt(raw, fallback) {
 const maxContextMessages = parsePositiveInt(process.env.LLM_MAX_CONTEXT_MESSAGES, 24)
 const maxContextChars = parsePositiveInt(process.env.LLM_MAX_CONTEXT_CHARS, 12000)
 const maxSingleMessageChars = parsePositiveInt(process.env.LLM_MAX_SINGLE_MESSAGE_CHARS, 4000)
+
+const embeddingClient = createEmbeddingClient({
+  providerBaseUrl,
+  embeddingPath,
+  embeddingModel,
+  apiKey: providerApiKey,
+  apiKeyHeader: providerApiKeyHeader,
+  apiKeyPrefix: providerApiKeyPrefix,
+})
+
+const ragStore = createRagStore({
+  dbFilePath: ragDbPath,
+  embedText: embeddingClient.embedText,
+})
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: ragMaxUploadMb * 1024 * 1024,
+  },
+})
+
+function nowTimeLabel() {
+  return new Date().toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function buildRagSystemPrompt(results) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return ''
+  }
+
+  const lines = results.map(
+    (item, index) =>
+      `[${index + 1}] 来源: ${item.source}\n相似度: ${(item.score * 100).toFixed(1)}%\n内容: ${item.content}`,
+  )
+
+  return `以下是检索到的参考资料，请优先基于资料回答；若资料不足请明确说明：\n\n${lines.join('\n\n')}`
+}
+
+async function extractTextFromUpload(file) {
+  if (!file || !Buffer.isBuffer(file.buffer)) {
+    throw new Error('上传文件无效。')
+  }
+
+  const name = String(file.originalname ?? '').toLowerCase()
+  const mime = String(file.mimetype ?? '').toLowerCase()
+  const safeName = normalizeUploadedFileName(file.originalname)
+
+  const buildFallbackText = (reason) => {
+    return [
+      `文档名: ${safeName}`,
+      '状态: 解析降级（已入库）',
+      `原因: ${reason}`,
+      '说明: 原文档未提取到可检索正文，建议上传可复制文本的 PDF 或先做 OCR 后再上传。',
+    ].join('\n')
+  }
+
+  if (name.endsWith('.pdf') || mime.includes('application/pdf')) {
+    try {
+      const parsed = await pdfParse(file.buffer)
+      const text = String(parsed?.text ?? '').trim()
+      if (text) {
+        return text
+      }
+      return buildFallbackText('PDF 解析为空（常见于扫描件）')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'PDF 解析失败'
+      return buildFallbackText(message)
+    }
+  }
+
+  if (
+    name.endsWith('.docx') ||
+    mime.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+  ) {
+    try {
+      const parsed = await mammoth.extractRawText({ buffer: file.buffer })
+      const text = String(parsed?.value ?? '').trim()
+      if (text) {
+        return text
+      }
+      return buildFallbackText('DOCX 解析为空')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'DOCX 解析失败'
+      return buildFallbackText(message)
+    }
+  }
+
+  const allowedByName =
+    name.endsWith('.txt') ||
+    name.endsWith('.md') ||
+    name.endsWith('.markdown') ||
+    name.endsWith('.csv') ||
+    name.endsWith('.json')
+
+  const allowedByMime =
+    String(file.mimetype ?? '').includes('text') ||
+    String(file.mimetype ?? '').includes('json') ||
+    String(file.mimetype ?? '').includes('csv')
+
+  if (allowedByName || allowedByMime) {
+    return file.buffer.toString('utf-8')
+  }
+
+  throw new Error('当前仅支持 txt/md/csv/json/pdf/docx 文档上传。')
+}
+
+function normalizeUploadedFileName(name) {
+  const raw = String(name ?? '').trim()
+  if (!raw) {
+    return 'uploaded.txt'
+  }
+
+  // 浏览器 multipart filename 在部分场景会以 latin1 解释 UTF-8。
+  const decoded = Buffer.from(raw, 'latin1').toString('utf8')
+  const decodedHasCjk = /[\u4e00-\u9fff]/.test(decoded)
+  const rawHasCjk = /[\u4e00-\u9fff]/.test(raw)
+
+  if (decodedHasCjk && !rawHasCjk) {
+    return decoded
+  }
+
+  return raw
+}
 
 app.use(
   cors({
@@ -68,6 +208,163 @@ app.get('/api/health', (_req, res) => {
     service: 'ai-chat-platform-server',
     time: new Date().toISOString(),
   })
+})
+
+app.get('/api/rag/kbs', (_req, res) => {
+  res.json(ragStore.listKnowledgeBases())
+})
+
+app.get('/api/rag/kbs/:kbId/documents', (req, res) => {
+  const kbId = String(req.params.kbId ?? '')
+  const docs = ragStore.listKnowledgeBaseDocuments(kbId)
+
+  if (!docs) {
+    res.status(404).json({ error: { message: '知识库不存在。' } })
+    return
+  }
+
+  res.json(docs)
+})
+
+app.post('/api/rag/kbs/:kbId/documents/upload', upload.single('file'), async (req, res) => {
+  const kbId = String(req.params.kbId ?? '')
+  const file = req.file
+
+  if (!file) {
+    res.status(400).json({ error: { message: '请选择上传文件。' } })
+    return
+  }
+
+  try {
+    const text = await extractTextFromUpload(file)
+    const result = await ragStore.ingestDocument(
+      kbId,
+      normalizeUploadedFileName(file.originalname),
+      file.size,
+      text,
+      nowTimeLabel(),
+    )
+
+    if (!result) {
+      res.status(404).json({ error: { message: '知识库不存在。' } })
+      return
+    }
+
+    res.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '文档入库失败。'
+    const likelyClientError =
+      message.includes('仅支持') ||
+      message.includes('无效') ||
+      message.includes('为空')
+
+    res.status(400).json({
+      error: {
+        message,
+      },
+    })
+
+    if (!likelyClientError) {
+      // 兼容既有前端 400 处理逻辑，后续可以改成 5xx 并在前端区分重试提示。
+      console.error('[upload] ingest failed:', error)
+    }
+  }
+})
+
+app.use((error, _req, res, next) => {
+  if (!error) {
+    next()
+    return
+  }
+
+  if (error.code === 'LIMIT_FILE_SIZE') {
+    res.status(400).json({
+      error: {
+        message: `上传文件过大，单文件不得超过 ${ragMaxUploadMb}MB。`,
+      },
+    })
+    return
+  }
+
+  res.status(500).json({
+    error: {
+      message: error instanceof Error ? error.message : '服务端处理失败。',
+    },
+  })
+})
+
+app.patch('/api/rag/kbs/:kbId/active', (req, res) => {
+  const kbId = String(req.params.kbId ?? '')
+  const kb = ragStore.toggleKnowledgeBaseActive(kbId, nowTimeLabel())
+  if (!kb) {
+    res.status(404).json({ error: { message: '知识库不存在。' } })
+    return
+  }
+
+  res.json(kb)
+})
+
+app.patch('/api/rag/documents/:docId/active', (req, res) => {
+  const docId = String(req.params.docId ?? '')
+  const doc = ragStore.toggleDocumentActive(docId, nowTimeLabel())
+  if (!doc) {
+    res.status(404).json({ error: { message: '文档不存在。' } })
+    return
+  }
+
+  res.json(doc)
+})
+
+app.delete('/api/rag/documents/:docId', (req, res) => {
+  const docId = String(req.params.docId ?? '')
+  const doc = ragStore.deleteDocument(docId)
+  if (!doc) {
+    res.status(404).json({ error: { message: '文档不存在。' } })
+    return
+  }
+
+  res.json({
+    ok: true,
+    documentId: doc.id,
+  })
+})
+
+app.post('/api/rag/rebuild', async (req, res) => {
+  const kbId = String(req.body?.kbId ?? '')
+  try {
+    const kb = await ragStore.rebuildKnowledgeBase(kbId, nowTimeLabel())
+    if (!kb) {
+      res.status(404).json({ error: { message: '知识库不存在。' } })
+      return
+    }
+
+    res.json(kb)
+  } catch (error) {
+    res.status(500).json({
+      error: {
+        message: error instanceof Error ? error.message : '重建索引失败。',
+      },
+    })
+  }
+})
+
+app.post('/api/rag/test-search', async (req, res) => {
+  const kbId = String(req.body?.kbId ?? '')
+  const query = String(req.body?.query ?? '')
+  const topK = parsePositiveInt(req.body?.topK, 5)
+  const mode = String(req.body?.mode ?? 'hybrid')
+
+  try {
+    const safeMode = mode === 'vector' || mode === 'off' ? mode : 'hybrid'
+    const results = await ragStore.search(kbId, query, topK, safeMode)
+    res.json(results)
+  } catch (error) {
+    res.status(500).json({
+      error: {
+        message: error instanceof Error ? error.message : '测试检索失败。',
+      },
+    })
+  }
 })
 
 function writeSse(res, data, eventName) {
@@ -211,7 +508,15 @@ app.post('/api/chat/stream', async (req, res) => {
   const sessionId = String(req.body?.sessionId ?? '')
   const prompt = String(req.body?.prompt ?? '')
   const model = normalizeModel(req.body?.model)
-  const messages = normalizeMessages(req.body?.messages, prompt)
+  const knowledgeBaseId = String(req.body?.knowledgeBaseId ?? '')
+  const retrievalModeRaw = String(req.body?.retrievalMode ?? 'hybrid')
+  const topK = parsePositiveInt(req.body?.topK, 4)
+  const retrievalMode =
+    retrievalModeRaw === 'vector' || retrievalModeRaw === 'off'
+      ? retrievalModeRaw
+      : 'hybrid'
+  let messages = normalizeMessages(req.body?.messages, prompt)
+  let citations = []
 
   if (!sessionId || messages.length === 0) {
     res.status(400).json({
@@ -231,6 +536,24 @@ app.post('/api/chat/stream', async (req, res) => {
     return
   }
 
+  if (knowledgeBaseId && retrievalMode !== 'off') {
+    try {
+      citations = await ragStore.search(knowledgeBaseId, prompt, topK, retrievalMode)
+      const ragPrompt = buildRagSystemPrompt(citations)
+      if (ragPrompt) {
+        messages = applyContextLimits([
+          {
+            role: 'system',
+            content: ragPrompt,
+          },
+          ...messages,
+        ])
+      }
+    } catch (error) {
+      console.error('[rag] retrieve failed:', error)
+    }
+  }
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
@@ -238,6 +561,10 @@ app.post('/api/chat/stream', async (req, res) => {
 
   if (typeof res.flushHeaders === 'function') {
     res.flushHeaders()
+  }
+
+  if (Array.isArray(citations) && citations.length > 0) {
+    writeSse(res, { citations }, 'citations')
   }
 
   const heartbeatTimer = setInterval(() => {

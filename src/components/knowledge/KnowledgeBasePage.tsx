@@ -1,171 +1,30 @@
-import { useMemo, useState } from 'react'
-
-interface KnowledgeBase {
-  id: string
-  name: string
-  status: string
-  docs: number
-  chunks: number
-  updatedAt: string
-  storageUsed: string
-  storageTotal: string
-  embeddingModel: string
-  embeddingDims: number
-  indexJobs: number
-  isActive: boolean
-}
-
-interface DocumentItem {
-  id: string
-  kbId: string
-  name: string
-  size: string
-  chunks: number
-  updatedAt: string
-  isActive: boolean
-}
-
-interface SearchChunk {
-  id: string
-  kbId: string
-  docId: string
-  source: string
-  content: string
-}
-
-interface SearchResult extends SearchChunk {
-  score: number
-}
-
-const initialBases: KnowledgeBase[] = [
-  {
-    id: 'kb-default',
-    name: '默认知识库',
-    docs: 24,
-    chunks: 1486,
-    updatedAt: '今天 10:12',
-    status: '健康',
-    storageUsed: '156MB',
-    storageTotal: '1GB',
-    embeddingModel: 'MiniLM-L6',
-    embeddingDims: 384,
-    indexJobs: 2,
-    isActive: true,
-  },
-  {
-    id: 'kb-product',
-    name: '产品文档库',
-    docs: 9,
-    chunks: 502,
-    updatedAt: '昨天 18:05',
-    status: '索引中',
-    storageUsed: '81MB',
-    storageTotal: '1GB',
-    embeddingModel: 'BGE-Small-ZH',
-    embeddingDims: 512,
-    indexJobs: 1,
-    isActive: true,
-  },
-]
-
-const initialDocuments: DocumentItem[] = [
-  {
-    id: 'doc-1',
-    kbId: 'kb-default',
-    name: '接入手册-v3.pdf',
-    size: '3.2 MB',
-    chunks: 86,
-    updatedAt: '今天 09:50',
-    isActive: true,
-  },
-  {
-    id: 'doc-2',
-    kbId: 'kb-default',
-    name: 'FAQ-售后策略.md',
-    size: '48 KB',
-    chunks: 14,
-    updatedAt: '今天 09:20',
-    isActive: false,
-  },
-  {
-    id: 'doc-3',
-    kbId: 'kb-default',
-    name: '知识抽取规则.txt',
-    size: '12 KB',
-    chunks: 6,
-    updatedAt: '昨天 20:14',
-    isActive: true,
-  },
-  {
-    id: 'doc-4',
-    kbId: 'kb-product',
-    name: '产品需求总览.md',
-    size: '72 KB',
-    chunks: 22,
-    updatedAt: '昨天 17:10',
-    isActive: true,
-  },
-  {
-    id: 'doc-5',
-    kbId: 'kb-product',
-    name: '版本发布说明-2026Q1.pdf',
-    size: '1.8 MB',
-    chunks: 41,
-    updatedAt: '昨天 16:40',
-    isActive: true,
-  },
-]
-
-const mockChunks: SearchChunk[] = [
-  {
-    id: 'chunk-1',
-    kbId: 'kb-default',
-    docId: 'doc-1',
-    source: '接入手册-v3.pdf / 第2章',
-    content: '鉴权失败时应先检查 access_token 过期时间，再校验时钟偏移与签名算法。',
-  },
-  {
-    id: 'chunk-2',
-    kbId: 'kb-default',
-    docId: 'doc-1',
-    source: '接入手册-v3.pdf / 第5章',
-    content: '流式接口采用 event-stream 协议，需处理 delta 与 done 两类事件。',
-  },
-  {
-    id: 'chunk-3',
-    kbId: 'kb-default',
-    docId: 'doc-2',
-    source: 'FAQ-售后策略.md / 条款3',
-    content: '普通故障工单响应时限为 2 小时，严重故障需在 30 分钟内确认。',
-  },
-  {
-    id: 'chunk-4',
-    kbId: 'kb-default',
-    docId: 'doc-3',
-    source: '知识抽取规则.txt / 模板A',
-    content: '切片建议长度 400 到 800 字，重叠区间建议在 80 到 120 字。',
-  },
-  {
-    id: 'chunk-5',
-    kbId: 'kb-product',
-    docId: 'doc-4',
-    source: '产品需求总览.md / 路线图',
-    content: '2026 年重点升级知识检索链路，目标将召回准确率提升 12%。',
-  },
-  {
-    id: 'chunk-6',
-    kbId: 'kb-product',
-    docId: 'doc-5',
-    source: '版本发布说明-2026Q1.pdf / 修复项',
-    content: '修复多会话场景下上下文拼接偶发重复问题，并优化暂停恢复流程。',
-  },
-]
+import { useEffect, useMemo, useState } from 'react'
+import {
+  deleteKnowledgeDocument,
+  listKnowledgeBaseDocuments,
+  listKnowledgeBases,
+  rebuildSearchEngine,
+  testRetrieval,
+  toggleDocumentActive,
+  toggleKnowledgeBaseActive,
+  uploadKnowledgeDocument,
+} from '../../services/knowledgeApi'
+import { useUIStore } from '../../store/uiStore'
+import type { DocumentItem, KnowledgeBase, SearchResult } from '../../types/knowledge'
 
 interface ToggleProps {
   checked: boolean
   onChange: (value: boolean) => void
   label: string
   disabled?: boolean
+}
+
+interface UploadTask {
+  id: string
+  name: string
+  progress: number
+  status: 'uploading' | 'done' | 'failed'
+  error?: string
 }
 
 function Toggle({ checked, onChange, label, disabled = false }: ToggleProps) {
@@ -200,98 +59,236 @@ function Toggle({ checked, onChange, label, disabled = false }: ToggleProps) {
   )
 }
 
-function calcScore(query: string, text: string): number {
-  const q = query.trim().toLowerCase()
-  const t = text.toLowerCase()
-
-  if (!q) {
-    return 0
-  }
-
-  const tokens = q.split(/\s+/).filter(Boolean)
-  let hit = 0
-
-  tokens.forEach((token) => {
-    if (t.includes(token)) {
-      hit += 1
-    }
-  })
-
-  const tokenScore = tokens.length > 0 ? hit / tokens.length : 0
-  const phraseScore = t.includes(q) ? 0.25 : 0
-  const lengthPenalty = Math.min(q.length / 60, 0.15)
-
-  return Math.min(0.99, 0.35 + tokenScore * 0.5 + phraseScore + lengthPenalty)
-}
-
 export function KnowledgeBasePage() {
-  const [bases, setBases] = useState<KnowledgeBase[]>(initialBases)
-  const [documents, setDocuments] = useState<DocumentItem[]>(initialDocuments)
-  const [activeKbId, setActiveKbId] = useState<string>(initialBases[0].id)
+  const [bases, setBases] = useState<KnowledgeBase[]>([])
+  const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
-  const [engineVersion, setEngineVersion] = useState(1)
-  const [lastRebuildAt, setLastRebuildAt] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [deletingDocumentId, setDeletingDocumentId] = useState('')
+  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([])
+
+  const activeKbId = useUIStore((state) => state.activeKnowledgeBaseId)
+  const retrievalMode = useUIStore((state) => state.retrievalMode)
+  const setActiveKnowledgeBaseId = useUIStore((state) => state.setActiveKnowledgeBaseId)
 
   const activeKb = useMemo(() => {
-    return bases.find((item) => item.id === activeKbId) ?? bases[0]
+    return bases.find((item) => item.id === activeKbId)
   }, [activeKbId, bases])
 
-  const docsOfActiveKb = useMemo(() => {
-    return documents.filter((doc) => doc.kbId === activeKbId)
-  }, [activeKbId, documents])
+  useEffect(() => {
+    const loadBases = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const items = await listKnowledgeBases()
+        setBases(items)
+        if (!items.find((item) => item.id === activeKbId) && items.length > 0) {
+          setActiveKnowledgeBaseId(items[0].id)
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载知识库失败。')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    void loadBases()
+  }, [activeKbId, setActiveKnowledgeBaseId])
+
+  useEffect(() => {
+    if (!activeKbId) {
+      setDocuments([])
+      return
+    }
+
+    const loadDocuments = async () => {
+      setError('')
+      try {
+        const docs = await listKnowledgeBaseDocuments(activeKbId)
+        setDocuments(docs)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载文档失败。')
+      }
+    }
+
+    void loadDocuments()
+  }, [activeKbId])
 
   const activeDocsCount = useMemo(() => {
-    return docsOfActiveKb.filter((doc) => doc.isActive).length
-  }, [docsOfActiveKb])
+    return documents.filter((doc) => doc.isActive).length
+  }, [documents])
 
-  const rebuildSearchEngine = () => {
-    setEngineVersion((prev) => prev + 1)
-    setLastRebuildAt(
-      new Date().toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      }),
-    )
+  const onRebuildSearchEngine = async () => {
+    if (!activeKbId) {
+      return
+    }
+
+    try {
+      const updated = await rebuildSearchEngine(activeKbId)
+      setBases((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重建索引失败。')
+    }
   }
 
-  const toggleKnowledgeBaseActive = (id: string) => {
-    setBases((prev) =>
-      prev.map((kb) => (kb.id === id ? { ...kb, isActive: !kb.isActive } : kb)),
-    )
-    rebuildSearchEngine()
+  const onToggleKnowledgeBaseActive = async (id: string) => {
+    try {
+      const updated = await toggleKnowledgeBaseActive(id)
+      setBases((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      if (activeKbId === id) {
+        setResults([])
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新知识库状态失败。')
+    }
   }
 
-  const toggleDocumentActive = (id: string) => {
-    setDocuments((prev) =>
-      prev.map((doc) => (doc.id === id ? { ...doc, isActive: !doc.isActive } : doc)),
-    )
-    rebuildSearchEngine()
+  const onToggleDocumentActive = async (id: string) => {
+    try {
+      const updated = await toggleDocumentActive(id)
+      setDocuments((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+      setResults([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新文档状态失败。')
+    }
   }
 
-  const testRetrieval = () => {
-    if (!activeKb || !query.trim()) {
+  const onDeleteDocument = async (doc: DocumentItem) => {
+    if (!activeKbId) {
+      return
+    }
+
+    const confirmDelete = window.confirm(`确认删除文档「${doc.name}」吗？该操作不可恢复。`)
+    if (!confirmDelete) {
+      return
+    }
+
+    setDeletingDocumentId(doc.id)
+    setError('')
+
+    try {
+      await deleteKnowledgeDocument(doc.id)
+      await reloadKnowledgeData(activeKbId)
+      setResults((prev) => prev.filter((item) => item.docId !== doc.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除文档失败。')
+    } finally {
+      setDeletingDocumentId('')
+    }
+  }
+
+  const onTestRetrieval = async () => {
+    if (!activeKbId || !query.trim()) {
       setResults([])
       return
     }
 
-    const enabledDocIds = new Set(
-      docsOfActiveKb.filter((doc) => doc.isActive).map((doc) => doc.id),
+    setTesting(true)
+    setError('')
+    try {
+      const items = await testRetrieval(activeKbId, query, 5, retrievalMode)
+      setResults(items)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '测试检索失败。')
+      setResults([])
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const reloadKnowledgeData = async (kbId: string) => {
+    const [baseList, docList] = await Promise.all([
+      listKnowledgeBases(),
+      listKnowledgeBaseDocuments(kbId),
+    ])
+    setBases(baseList)
+    setDocuments(docList)
+  }
+
+  const onUploadDocument = async (files: FileList | null) => {
+    const fileList = files ? Array.from(files) : []
+    if (fileList.length === 0 || !activeKbId) {
+      return
+    }
+
+    setUploading(true)
+    setError('')
+
+    const taskIds = fileList.map(() => crypto.randomUUID())
+    setUploadTasks((prev) => [
+      ...fileList.map((file, index) => ({
+        id: taskIds[index],
+        name: file.name,
+        progress: 0,
+        status: 'uploading' as const,
+      })),
+      ...prev,
+    ])
+
+    const outcomes = await Promise.allSettled(
+      fileList.map((file, index) =>
+        uploadKnowledgeDocument(activeKbId, file, {
+          onProgress: (progress) => {
+            setUploadTasks((prev) =>
+              prev.map((item) =>
+                item.id === taskIds[index]
+                  ? {
+                      ...item,
+                      progress,
+                    }
+                  : item,
+              ),
+            )
+          },
+        })
+          .then(() => {
+            setUploadTasks((prev) =>
+              prev.map((item) =>
+                item.id === taskIds[index]
+                  ? {
+                      ...item,
+                      progress: 100,
+                      status: 'done',
+                    }
+                  : item,
+              ),
+            )
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : '上传失败'
+            setUploadTasks((prev) =>
+              prev.map((item) =>
+                item.id === taskIds[index]
+                  ? {
+                      ...item,
+                      status: 'failed',
+                      error: message,
+                    }
+                  : item,
+              ),
+            )
+            throw err
+          }),
+      ),
     )
 
-    const top5 = mockChunks
-      .filter((chunk) => chunk.kbId === activeKb.id)
-      .filter((chunk) => enabledDocIds.has(chunk.docId))
-      .map((chunk) => ({
-        ...chunk,
-        score: calcScore(query, `${chunk.source} ${chunk.content}`),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
+    const hasFailure = outcomes.some((item) => item.status === 'rejected')
+    if (hasFailure) {
+      setError('部分文档上传失败，请查看下方失败原因。')
+    }
 
-    setResults(top5)
+    try {
+      await reloadKnowledgeData(activeKbId)
+      setResults([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '刷新文档列表失败。')
+    }
+
+    setUploading(false)
   }
 
   return (
@@ -321,7 +318,10 @@ export function KnowledgeBasePage() {
               >
                 <button
                   type="button"
-                  onClick={() => setActiveKbId(kb.id)}
+                  onClick={() => {
+                    setActiveKnowledgeBaseId(kb.id)
+                    setResults([])
+                  }}
                   className="w-full text-left"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -337,7 +337,9 @@ export function KnowledgeBasePage() {
                 <div className="mt-2 border-t border-slate-200 pt-2">
                   <Toggle
                     checked={kb.isActive}
-                    onChange={() => toggleKnowledgeBaseActive(kb.id)}
+                    onChange={() => {
+                      void onToggleKnowledgeBaseActive(kb.id)
+                    }}
                     label="在对话中引用"
                   />
                 </div>
@@ -352,8 +354,18 @@ export function KnowledgeBasePage() {
               当前知识库：{activeKb?.name ?? '未知'}
             </h2>
             <label className="cursor-pointer rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100">
-              上传文档
-              <input type="file" className="hidden" multiple />
+              {uploading ? '上传中...' : '上传文档'}
+              <input
+                type="file"
+                className="hidden"
+                accept=".txt,.md,.markdown,.csv,.json,.pdf,.docx"
+                onChange={(event) => {
+                  void onUploadDocument(event.target.files)
+                  event.currentTarget.value = ''
+                }}
+                disabled={uploading}
+                multiple
+              />
             </label>
           </div>
 
@@ -366,15 +378,21 @@ export function KnowledgeBasePage() {
             />
             <button
               type="button"
-              onClick={testRetrieval}
+              onClick={() => {
+                void onTestRetrieval()
+              }}
+              disabled={testing || query.trim().length === 0}
               className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-700"
             >
-              测试检索
+              {testing ? '检索中...' : '测试检索'}
             </button>
           </div>
 
+          {error ? <p className="mb-3 text-xs text-rose-600">{error}</p> : null}
+          {loading ? <p className="mb-3 text-xs text-slate-500">加载知识库中...</p> : null}
+
           <div className="space-y-2">
-            {docsOfActiveKb.map((doc) => (
+            {documents.map((doc) => (
               <div key={doc.id} className="rounded-lg border border-slate-200 p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -384,16 +402,71 @@ export function KnowledgeBasePage() {
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">更新于 {doc.updatedAt}</p>
                   </div>
-                  <Toggle
-                    checked={doc.isActive}
-                    onChange={() => toggleDocumentActive(doc.id)}
-                    label="在对话中引用"
-                    disabled={!activeKb?.isActive}
-                  />
+                  <div className="flex flex-col items-end gap-2">
+                    <Toggle
+                      checked={doc.isActive}
+                      onChange={() => {
+                        void onToggleDocumentActive(doc.id)
+                      }}
+                      label="在对话中引用"
+                      disabled={!activeKb?.isActive}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void onDeleteDocument(doc)
+                      }}
+                      disabled={deletingDocumentId === doc.id}
+                      className="rounded border border-rose-200 px-2 py-1 text-[11px] text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingDocumentId === doc.id ? '删除中...' : '删除文档'}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
+
+          {uploadTasks.length > 0 && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-medium text-slate-700">上传任务</p>
+              <div className="space-y-2">
+                {uploadTasks.slice(0, 6).map((task) => (
+                  <div key={task.id} className="rounded-md border border-slate-200 bg-white p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-xs text-slate-700">{task.name}</p>
+                      <span
+                        className={[
+                          'text-[11px]',
+                          task.status === 'failed'
+                            ? 'text-rose-600'
+                            : task.status === 'done'
+                              ? 'text-emerald-700'
+                              : 'text-sky-700',
+                        ].join(' ')}
+                      >
+                        {task.status === 'failed'
+                          ? '失败'
+                          : task.status === 'done'
+                            ? '完成'
+                            : `${task.progress}%`}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 w-full rounded bg-slate-200">
+                      <div
+                        className={[
+                          'h-1.5 rounded transition-all',
+                          task.status === 'failed' ? 'bg-rose-500' : 'bg-sky-500',
+                        ].join(' ')}
+                        style={{ width: `${task.status === 'failed' ? Math.max(task.progress, 12) : task.progress}%` }}
+                      />
+                    </div>
+                    {task.error ? <p className="mt-1 text-[11px] text-rose-600">{task.error}</p> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-medium text-slate-700">Top-5 检索结果</p>
@@ -443,13 +516,13 @@ export function KnowledgeBasePage() {
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">已激活文档</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{activeDocsCount} / {docsOfActiveKb.length}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{activeDocsCount} / {documents.length}</p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">检索引擎版本</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">v{engineVersion}</p>
-              {lastRebuildAt ? (
-                <p className="mt-0.5 text-xs text-slate-500">最近重建：{lastRebuildAt}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">v{activeKb?.engineVersion ?? 1}</p>
+              {activeKb?.lastRebuildAt ? (
+                <p className="mt-0.5 text-xs text-slate-500">最近重建：{activeKb.lastRebuildAt}</p>
               ) : (
                 <p className="mt-0.5 text-xs text-slate-500">尚未重建</p>
               )}
@@ -458,7 +531,9 @@ export function KnowledgeBasePage() {
 
           <button
             type="button"
-            onClick={rebuildSearchEngine}
+            onClick={() => {
+              void onRebuildSearchEngine()
+            }}
             className="mt-4 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 hover:bg-slate-100"
           >
             重建索引

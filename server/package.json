@@ -10,9 +10,13 @@
   "dependencies": {
     "ai-chat-platform": "file:..",
     "axios": "^1.13.0",
+    "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "eventsource-parser": "^3.0.6",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "mammoth": "^1.12.0",
+    "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5"
   }
 }

@@ -65,6 +65,8 @@ function App() {
 
   const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen)
   const page = useUIStore((state) => state.page)
+  const activeKnowledgeBaseId = useUIStore((state) => state.activeKnowledgeBaseId)
+  const retrievalMode = useUIStore((state) => state.retrievalMode)
   const inputValue = useUIStore((state) => state.inputValue)
   const uploads = useUIStore((state) => state.uploads)
   const setPage = useUIStore((state) => state.setPage)
@@ -119,6 +121,7 @@ function App() {
         content: '',
         createdAt: nowTimeLabel(),
         status: 'streaming',
+        citations: [],
       })
     }
 
@@ -139,6 +142,9 @@ function App() {
       sessionId,
       prompt,
       model,
+      knowledgeBaseId: activeKnowledgeBaseId,
+      retrievalMode,
+      topK: 4,
       messages: contextMessages
         .filter(
           (item) =>
@@ -156,6 +162,12 @@ function App() {
           return
         }
         addChunkMessage(sessionId, chunk)
+      },
+      onCitations: (citations) => {
+        updateMessageById(sessionId, assistantId, (message) => ({
+          ...message,
+          citations,
+        }))
       },
       onDone: () => {
         updateMessageById(sessionId, assistantId, (message) => ({

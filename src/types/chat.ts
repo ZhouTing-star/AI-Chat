@@ -4,6 +4,13 @@ export type MessageStatus = 'done' | 'streaming' | 'paused'
 
 export type MessageType = 'text' | 'image' | 'file'
 
+export interface MessageCitation {
+  id: string
+  source: string
+  content: string
+  score: number
+}
+
 
 /**
  * 单条聊天消息对象结构
@@ -19,6 +26,7 @@ export interface ChatMessage {
   imageUrl?: string      // 图片地址（type=image时使用）
   fileName?: string      // 文件名（type=file时使用）
   fileUrl?: string       // 文件下载地址（type=file时使用）
+  citations?: MessageCitation[] // RAG 命中引用来源
 }
 
 /**
