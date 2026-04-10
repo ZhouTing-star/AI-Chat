@@ -8,6 +8,8 @@ interface SessionState {
   activeSessionId: string
   setActiveSessionId: (sessionId: string) => void
   createSession: (model?: string) => ChatSession
+  renameSession: (sessionId: string, title: string) => void
+  deleteSession: (sessionId: string) => void
   updateSessionPreview: (sessionId: string, preview: string) => void
   updateSessionAnswerMode: (sessionId: string, answerMode: ChatSession['answerMode']) => void
 }
@@ -40,6 +42,38 @@ export const useSessionStore = create(
           activeSessionId: session.id,
         }))
         return session
+      },
+      renameSession: (sessionId: string, title: string) => {
+        const nextTitle = title.trim()
+        if (!nextTitle) {
+          return
+        }
+
+        set((state: SessionState) => ({
+          sessions: state.sessions.map((session: ChatSession) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  title: nextTitle,
+                  updatedAt: nowTimeLabel(),
+                }
+              : session,
+          ),
+        }))
+      },
+      deleteSession: (sessionId: string) => {
+        set((state: SessionState) => {
+          const nextSessions = state.sessions.filter((session: ChatSession) => session.id !== sessionId)
+          const nextActiveSessionId =
+            state.activeSessionId === sessionId
+              ? nextSessions[0]?.id ?? ''
+              : state.activeSessionId
+
+          return {
+            sessions: nextSessions,
+            activeSessionId: nextActiveSessionId,
+          }
+        })
       },
       updateSessionPreview: (sessionId: string, preview: string) => {
         set((state: SessionState) => ({

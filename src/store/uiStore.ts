@@ -20,6 +20,7 @@ interface UIState {
   addUploads: (uploads: UploadItem[]) => void
   updateUpload: (uploadId: string, patch: Partial<UploadItem>) => void
   removeUpload: (uploadId: string) => void
+  removeUploadsBySession: (sessionId: string) => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -56,6 +57,11 @@ export const useUIStore = create<UIState>()(
       removeUpload: (uploadId) => {
         set((state) => ({
           uploads: state.uploads.filter((upload) => upload.id !== uploadId),
+        }))
+      },
+      removeUploadsBySession: (sessionId) => {
+        set((state) => ({
+          uploads: state.uploads.filter((upload) => upload.sessionId !== sessionId),
         }))
       },
     }),

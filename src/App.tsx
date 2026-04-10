@@ -49,6 +49,8 @@ function App() {
   const activeSessionId = useSessionStore((state) => state.activeSessionId)
   const setActiveSessionId = useSessionStore((state) => state.setActiveSessionId)
   const createSession = useSessionStore((state) => state.createSession)
+  const renameSession = useSessionStore((state) => state.renameSession)
+  const deleteSession = useSessionStore((state) => state.deleteSession)
   const updateSessionPreview = useSessionStore((state) => state.updateSessionPreview)
   const updateSessionAnswerMode = useSessionStore((state) => state.updateSessionAnswerMode)
 
@@ -60,6 +62,7 @@ function App() {
   const removeMessageById = useChatStore((state) => state.removeMessageById)
   const appendToMessageById = useChatStore((state) => state.appendToMessageById)
   const updateMessageById = useChatStore((state) => state.updateMessageById)
+  const removeSessionData = useChatStore((state) => state.removeSessionData)
   const setSessionStreaming = useChatStore((state) => state.setSessionStreaming)
   const setSessionPaused = useChatStore((state) => state.setSessionPaused)
   const isStreaming = useChatStore(
@@ -81,9 +84,10 @@ function App() {
   const addUploads = useUIStore((state) => state.addUploads)
   const updateUpload = useUIStore((state) => state.updateUpload)
   const removeUpload = useUIStore((state) => state.removeUpload)
+  const removeUploadsBySession = useUIStore((state) => state.removeUploadsBySession)
 
   const activeSession = useMemo(() => {
-    return sessions.find((session) => session.id === activeSessionId) ?? sessions[0]
+    return sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? null
   }, [activeSessionId, sessions])
 
   const activeMessages = messagesBySession.get(activeSessionId) ?? []
@@ -109,6 +113,19 @@ function App() {
       streamClosers.clear()
     }
   }, [])
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      const created = createSession('glm-4-flash')
+      ensureSession(created.id)
+      return
+    }
+
+    const exists = sessions.some((session) => session.id === activeSessionId)
+    if (!exists) {
+      setActiveSessionId(sessions[0].id)
+    }
+  }, [activeSessionId, createSession, ensureSession, sessions, setActiveSessionId])
 
   const startStreamReply = (
     sessionId: string,
@@ -311,6 +328,21 @@ function App() {
     setMobileSidebarOpen(false)
   }
 
+  const handleRenameSession = (sessionId: string, title: string) => {
+    renameSession(sessionId, title)
+  }
+
+  const handleDeleteSession = (sessionId: string) => {
+    streamClosersRef.current.get(sessionId)?.()
+    streamClosersRef.current.delete(sessionId)
+    streamTasksRef.current.delete(sessionId)
+
+    setCanRegenerate(sessionId, false)
+    removeSessionData(sessionId)
+    removeUploadsBySession(sessionId)
+    deleteSession(sessionId)
+  }
+
   const handlePickFile = (files: FileList) => {
     const fileList = Array.from(files)
     const queuedItems: UploadItem[] = fileList.map((file) => ({
@@ -459,14 +491,16 @@ function App() {
         activeSessionId={activeSessionId}
         onSelectSession={setActiveSessionId}
         onNewSession={handleNewSession}
+        onRenameSession={handleRenameSession}
+        onDeleteSession={handleDeleteSession}
         mobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
       />
 
       <section className="flex h-full flex-1 flex-col overflow-hidden bg-slate-50 lg:ml-0 lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white">
         <TopBar
-          title={page === 'knowledge-base' ? '本地知识库管理' : activeSession.title}
-          model={activeSession.model}
+          title={page === 'knowledge-base' ? '本地知识库管理' : (activeSession?.title ?? '新对话')}
+          model={activeSession?.model ?? 'glm-4-flash'}
           themeMode={themeMode}
           isKnowledgeBasePage={page === 'knowledge-base'}
           isStreaming={isStreaming}
@@ -495,7 +529,12 @@ function App() {
               value={inputValue}
               answerMode={activeAnswerMode}
               onChange={setInputValue}
-              onChangeAnswerMode={(mode) => updateSessionAnswerMode(activeSessionId, mode)}
+              onChangeAnswerMode={(mode) => {
+                if (!activeSession) {
+                  return
+                }
+                updateSessionAnswerMode(activeSession.id, mode)
+              }}
               onSend={handleSend}
               onPickFile={handlePickFile}
               onRemoveUpload={removeUpload}

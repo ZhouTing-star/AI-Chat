@@ -24,3 +24,5 @@ server/.env
 *.njsproj
 *.sln
 *.sw?
+
+.agents/

@@ -19,6 +19,7 @@ interface ChatState {
     messageId: string,
     updater: (message: ChatMessage) => ChatMessage,
   ) => void
+  removeSessionData: (sessionId: string) => void
   setSessionStreaming: (sessionId: string, streaming: boolean) => void
   setSessionPaused: (sessionId: string, paused: boolean) => void
 }
@@ -108,6 +109,24 @@ export const useChatStore = create(
           list[index] = updater(list[index])
           next.set(sessionId, list)
           return { messagesBySession: next }
+        })
+      },
+      removeSessionData: (sessionId: string) => {
+        set((state: ChatState) => {
+          const nextMessages = new Map(state.messagesBySession)
+          nextMessages.delete(sessionId)
+
+          const nextStreaming = { ...state.sessionStreaming }
+          delete nextStreaming[sessionId]
+
+          const nextPaused = { ...state.sessionPaused }
+          delete nextPaused[sessionId]
+
+          return {
+            messagesBySession: nextMessages,
+            sessionStreaming: nextStreaming,
+            sessionPaused: nextPaused,
+          }
         })
       },
       setSessionStreaming: (sessionId: string, streaming: boolean) => {
