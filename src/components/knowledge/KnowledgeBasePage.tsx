@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  createKnowledgeBase,
   deleteKnowledgeDocument,
   listKnowledgeBaseDocuments,
   listKnowledgeBases,
@@ -12,6 +13,9 @@ import {
 import { useUIStore } from '../../store/uiStore'
 import type { DocumentItem, KnowledgeBase, SearchResult } from '../../types/knowledge'
 
+/**
+ * 开关组件（Toggle）Props
+ */
 interface ToggleProps {
   checked: boolean
   onChange: (value: boolean) => void
@@ -19,6 +23,9 @@ interface ToggleProps {
   disabled?: boolean
 }
 
+/**
+ * 上传任务状态
+ */
 interface UploadTask {
   id: string
   name: string
@@ -27,6 +34,9 @@ interface UploadTask {
   error?: string
 }
 
+/**
+ * 开关组件：用于启用/禁用知识库、文档
+ */
 function Toggle({ checked, onChange, label, disabled = false }: ToggleProps) {
   return (
     <label className="inline-flex items-center gap-2 text-xs text-slate-600">
@@ -59,26 +69,51 @@ function Toggle({ checked, onChange, label, disabled = false }: ToggleProps) {
   )
 }
 
+/**
+ * 本地知识库管理页面
+ * 功能：
+ * 1. 创建/切换知识库
+ * 2. 上传文档、解析、切片
+ * 3. 启用/禁用文档、知识库
+ * 4. 测试检索（相似度搜索）
+ * 5. 重建索引、删除文档
+ * 6. 查看存储/文档/索引状态
+ */
 export function KnowledgeBasePage() {
+  // 知识库列表
   const [bases, setBases] = useState<KnowledgeBase[]>([])
+  // 当前知识库的文档列表
   const [documents, setDocuments] = useState<DocumentItem[]>([])
+  // 检索测试输入框内容
   const [query, setQuery] = useState('')
+  // 检索测试结果
   const [results, setResults] = useState<SearchResult[]>([])
+  // 加载状态
   const [loading, setLoading] = useState(false)
+  // 错误提示
   const [error, setError] = useState('')
+  // 测试检索中
   const [testing, setTesting] = useState(false)
+  // 上传中
   const [uploading, setUploading] = useState(false)
+  // 创建知识库中
+  const [creatingKb, setCreatingKb] = useState(false)
+  // 删除文档中（记录ID）
   const [deletingDocumentId, setDeletingDocumentId] = useState('')
+  // 上传任务列表（显示进度条）
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([])
 
+  // 全局状态：当前选中的知识库ID
   const activeKbId = useUIStore((state) => state.activeKnowledgeBaseId)
   const retrievalMode = useUIStore((state) => state.retrievalMode)
   const setActiveKnowledgeBaseId = useUIStore((state) => state.setActiveKnowledgeBaseId)
 
+  // 当前选中的知识库
   const activeKb = useMemo(() => {
     return bases.find((item) => item.id === activeKbId)
   }, [activeKbId, bases])
 
+  // 加载知识库列表
   useEffect(() => {
     const loadBases = async () => {
       setLoading(true)
@@ -86,8 +121,9 @@ export function KnowledgeBasePage() {
       try {
         const items = await listKnowledgeBases()
         setBases(items)
-        if (!items.find((item) => item.id === activeKbId) && items.length > 0) {
-          setActiveKnowledgeBaseId(items[0].id)
+        // 如果当前选中的知识库不存在，自动切换到第一个
+        if (!items.find((item) => item.id === activeKbId)) {
+          setActiveKnowledgeBaseId(items[0]?.id ?? '')
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载知识库失败。')
@@ -99,6 +135,7 @@ export function KnowledgeBasePage() {
     void loadBases()
   }, [activeKbId, setActiveKnowledgeBaseId])
 
+  // 切换知识库时，加载对应文档
   useEffect(() => {
     if (!activeKbId) {
       setDocuments([])
@@ -118,10 +155,25 @@ export function KnowledgeBasePage() {
     void loadDocuments()
   }, [activeKbId])
 
+  // 已激活的文档数量
   const activeDocsCount = useMemo(() => {
     return documents.filter((doc) => doc.isActive).length
   }, [documents])
 
+  // 索引状态显示文字
+  const indexStatusLabel = useMemo(() => {
+    if (!activeKb) {
+      return '不可用'
+    }
+
+    if ((activeKb.indexJobs ?? 0) > 0 || activeKb.status === '索引中') {
+      return `${activeKb.indexJobs} 个运行中`
+    }
+
+    return '就绪 ✓'
+  }, [activeKb])
+
+  // 重建搜索引擎索引
   const onRebuildSearchEngine = async () => {
     if (!activeKbId) {
       return
@@ -135,6 +187,7 @@ export function KnowledgeBasePage() {
     }
   }
 
+  // 切换知识库启用状态
   const onToggleKnowledgeBaseActive = async (id: string) => {
     try {
       const updated = await toggleKnowledgeBaseActive(id)
@@ -147,6 +200,35 @@ export function KnowledgeBasePage() {
     }
   }
 
+  // 创建新知识库
+  const onCreateKnowledgeBase = async () => {
+    const input = window.prompt('请输入知识库名称', '新建知识库')
+    if (input === null) {
+      return
+    }
+
+    const name = input.trim()
+    if (!name) {
+      setError('知识库名称不能为空。')
+      return
+    }
+
+    setCreatingKb(true)
+    setError('')
+
+    try {
+      const created = await createKnowledgeBase(name)
+      setActiveKnowledgeBaseId(created.id)
+      setResults([])
+      await reloadKnowledgeData(created.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建知识库失败。')
+    } finally {
+      setCreatingKb(false)
+    }
+  }
+
+  // 切换文档启用/禁用状态
   const onToggleDocumentActive = async (id: string) => {
     try {
       const updated = await toggleDocumentActive(id)
@@ -157,6 +239,7 @@ export function KnowledgeBasePage() {
     }
   }
 
+  // 删除文档
   const onDeleteDocument = async (doc: DocumentItem) => {
     if (!activeKbId) {
       return
@@ -181,6 +264,7 @@ export function KnowledgeBasePage() {
     }
   }
 
+  // 测试检索：输入问题，返回最相关的5条片段
   const onTestRetrieval = async () => {
     if (!activeKbId || !query.trim()) {
       setResults([])
@@ -200,6 +284,7 @@ export function KnowledgeBasePage() {
     }
   }
 
+  // 重新加载知识库 + 文档列表
   const reloadKnowledgeData = async (kbId: string) => {
     const [baseList, docList] = await Promise.all([
       listKnowledgeBases(),
@@ -209,6 +294,7 @@ export function KnowledgeBasePage() {
     setDocuments(docList)
   }
 
+  // 上传文档到知识库
   const onUploadDocument = async (files: FileList | null) => {
     const fileList = files ? Array.from(files) : []
     if (fileList.length === 0 || !activeKbId) {
@@ -218,6 +304,7 @@ export function KnowledgeBasePage() {
     setUploading(true)
     setError('')
 
+    // 生成上传任务，用于显示进度条
     const taskIds = fileList.map(() => crypto.randomUUID())
     setUploadTasks((prev) => [
       ...fileList.map((file, index) => ({
@@ -229,6 +316,7 @@ export function KnowledgeBasePage() {
       ...prev,
     ])
 
+    // 批量上传
     const outcomes = await Promise.allSettled(
       fileList.map((file, index) =>
         uploadKnowledgeDocument(activeKbId, file, {
@@ -276,11 +364,13 @@ export function KnowledgeBasePage() {
       ),
     )
 
+    // 检查是否有失败
     const hasFailure = outcomes.some((item) => item.status === 'rejected')
     if (hasFailure) {
       setError('部分文档上传失败，请查看下方失败原因。')
     }
 
+    // 刷新列表
     try {
       await reloadKnowledgeData(activeKbId)
       setResults([])
@@ -291,17 +381,26 @@ export function KnowledgeBasePage() {
     setUploading(false)
   }
 
+  // ——————————————————————————————
+  // 页面渲染
+  // ——————————————————————————————
   return (
     <div className="h-full overflow-auto px-4 py-4 lg:px-6">
       <div className="grid gap-4 lg:grid-cols-12">
+
+        {/* 左侧：知识库列表 */}
         <section className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-3">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-900">知识库列表</h2>
             <button
               type="button"
+              onClick={() => {
+                void onCreateKnowledgeBase()
+              }}
+              disabled={creatingKb}
               className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-100"
             >
-              新建
+              {creatingKb ? '创建中...' : '新建'}
             </button>
           </div>
 
@@ -348,6 +447,7 @@ export function KnowledgeBasePage() {
           </div>
         </section>
 
+        {/* 中间：文档管理 + 上传 + 检索测试 */}
         <section className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-6">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-slate-900">
@@ -369,6 +469,7 @@ export function KnowledgeBasePage() {
             </label>
           </div>
 
+          {/* 检索测试 */}
           <div className="mb-4 flex gap-2">
             <input
               value={query}
@@ -391,6 +492,7 @@ export function KnowledgeBasePage() {
           {error ? <p className="mb-3 text-xs text-rose-600">{error}</p> : null}
           {loading ? <p className="mb-3 text-xs text-slate-500">加载知识库中...</p> : null}
 
+          {/* 文档列表 */}
           <div className="space-y-2">
             {documents.map((doc) => (
               <div key={doc.id} className="rounded-lg border border-slate-200 p-3">
@@ -427,6 +529,7 @@ export function KnowledgeBasePage() {
             ))}
           </div>
 
+          {/* 上传任务进度条 */}
           {uploadTasks.length > 0 && (
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="mb-2 text-xs font-medium text-slate-700">上传任务</p>
@@ -468,6 +571,7 @@ export function KnowledgeBasePage() {
             </div>
           )}
 
+          {/* 检索结果展示 */}
           <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-medium text-slate-700">Top-5 检索结果</p>
             {results.length === 0 ? (
@@ -492,40 +596,27 @@ export function KnowledgeBasePage() {
           </div>
         </section>
 
+        {/* 右侧：系统状态面板 */}
         <section className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-3">
           <h2 className="text-sm font-semibold text-slate-900">系统状态</h2>
           <div className="mt-3 space-y-3">
             <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">存储占用</p>
+              <p className="text-xs text-slate-500">存储</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
-                {activeKb?.storageUsed}/{activeKb?.storageTotal}
+                {activeKb?.storageUsed ?? '0 B'} / {activeKb?.storageTotal ?? '1 GB'}
               </p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">向量模型</p>
+              <p className="text-xs text-slate-500">文档</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
-                {activeKb?.embeddingModel}
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500">{activeKb?.embeddingDims} 维</p>
-            </div>
-            <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">索引任务</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">
-                {activeKb?.indexJobs} 个运行中
+                {activeDocsCount} 个已激活
               </p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">已激活文档</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{activeDocsCount} / {documents.length}</p>
-            </div>
-            <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">检索引擎版本</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">v{activeKb?.engineVersion ?? 1}</p>
-              {activeKb?.lastRebuildAt ? (
-                <p className="mt-0.5 text-xs text-slate-500">最近重建：{activeKb.lastRebuildAt}</p>
-              ) : (
-                <p className="mt-0.5 text-xs text-slate-500">尚未重建</p>
-              )}
+              <p className="text-xs text-slate-500">索引</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {indexStatusLabel}
+              </p>
             </div>
           </div>
 

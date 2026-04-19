@@ -6,6 +6,10 @@ export type MessageType = 'text' | 'image' | 'file'
 
 export type AnswerMode = 'strict' | 'balanced' | 'general'
 
+/**
+ * 引用文献/知识库片段结构
+ * RAG 检索返回的引用来源信息
+ */
 export interface MessageCitation {
   id: string
   source: string

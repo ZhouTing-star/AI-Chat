@@ -5,22 +5,30 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import remarkGfm from 'remark-gfm'
 import type { AnswerMode, ChatMessage, MessageType } from '../../types/chat'
 
+// 组件接收的 Props：单条消息对象
 interface MessageItemProps {
   message: ChatMessage
 }
 
+// 代码块组件 Props
 interface CodeBlockProps {
   language: string
   code: string
 }
 
+/**
+ * 代码块组件（带复制功能）
+ */
 function CodeBlock({ language, code }: CodeBlockProps) {
+  // 控制“复制”按钮文字状态
   const [copied, setCopied] = useState(false)
 
+  // 复制代码到剪贴板
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(code)
       setCopied(true)
+      // 1.2秒后恢复“复制”文字
       window.setTimeout(() => setCopied(false), 1200)
     } catch {
       setCopied(false)
@@ -54,7 +62,9 @@ function CodeBlock({ language, code }: CodeBlockProps) {
     </div>
   )
 }
-
+/**
+ * 渲染【文本/Markdown】类型消息
+ */
 function renderTextMessage(message: ChatMessage) {
   return (
     <div className="markdown-body text-sm leading-6">
@@ -109,6 +119,9 @@ function renderTextMessage(message: ChatMessage) {
   )
 }
 
+/**
+ * 渲染【图片】类型消息
+ */
 function renderImageMessage(message: ChatMessage) {
   return (
     <div className="space-y-2">
@@ -124,7 +137,9 @@ function renderImageMessage(message: ChatMessage) {
     </div>
   )
 }
-
+/**
+ * 渲染【文件】类型消息
+ */
 function renderFileMessage(message: ChatMessage) {
   return (
     <div className="space-y-2">
@@ -140,23 +155,27 @@ function renderFileMessage(message: ChatMessage) {
     </div>
   )
 }
-
+// 消息类型 -> 渲染函数 映射表
 const messageRenderer: Record<MessageType, (message: ChatMessage) => ReactElement> = {
   text: renderTextMessage,
   image: renderImageMessage,
   file: renderFileMessage,
 }
 
-const CITATION_SCORE_THRESHOLD = 0.4
-const STRICT_SCORE_THRESHOLD = 0.7
-const CITATION_MAX_COUNT = 5
-const CITATION_PREVIEW_CHARS = 80
+// ========== 引用来源（Citations）相关配置 ==========
+const CITATION_SCORE_THRESHOLD = 0.4      // 普通相关性阈值
+const STRICT_SCORE_THRESHOLD = 0.7        // 严格高匹配阈值
+const CITATION_MAX_COUNT = 5              // 最多展示几条来源
+const CITATION_PREVIEW_CHARS = 80         // 来源内容预览长度
 
+// 透明度徽章类型
 interface TransparencyBadge {
   text: string
   toneClass: string
 }
-
+/**
+ * 解码 HTML 实体（如 &lt; &gt;）
+ */
 function decodeHtmlEntities(text: string): string {
   if (typeof document === 'undefined') {
     return text
@@ -166,13 +185,17 @@ function decodeHtmlEntities(text: string): string {
   textarea.innerHTML = text
   return textarea.value
 }
-
+/**
+ * 解码 HTML 实体（如 &lt; &gt;）
+ */
 function cleanCitationText(raw: string): string {
   const withoutTags = raw.replace(/<[^>]*>/g, ' ')
   const decoded = decodeHtmlEntities(withoutTags)
   return decoded.replace(/\s+/g, ' ').trim()
 }
-
+/**
+ * 文本截断（超出长度显示 ...）
+ */
 function shortenText(text: string, limit: number): string {
   if (text.length <= limit) {
     return text
@@ -180,6 +203,9 @@ function shortenText(text: string, limit: number): string {
   return `${text.slice(0, limit).trim()}...`
 }
 
+/**
+ * 根据回答模式和引用分数，构建底部的透明度徽章（基于资料/未找到/AI回答）
+ */
 function buildTransparencyBadge(
   answerMode: AnswerMode,
   citations: Array<{ score: number }>,
@@ -227,20 +253,24 @@ function buildTransparencyBadge(
     toneClass: 'border-slate-200 bg-slate-100 text-slate-700',
   }
 }
-
+/**
+ * 单条消息主体组件
+ */
 function MessageItemComponent({ message }: MessageItemProps) {
-  const isUser = message.role === 'user'
-  const isStreaming = message.status === 'streaming'
-  const type: MessageType = message.type ?? 'text'
-  const renderer = messageRenderer[type] ?? renderTextMessage
+  const isUser = message.role === 'user'             // 是否是用户消息
+  const isStreaming = message.status === 'streaming' // 是否正在流式输出
+  const type: MessageType = message.type ?? 'text'    // 消息类型，默认文本
+  const renderer = messageRenderer[type] ?? renderTextMessage // 获取对应渲染函数
+  // 引用来源面板展开状态
   const [citationsPanelOpen, setCitationsPanelOpen] = useState(false)
   const [highQualityExpanded, setHighQualityExpanded] = useState(false)
   const [lowQualityExpanded, setLowQualityExpanded] = useState(false)
 
+  // 对引用进行排序、清洗、截取（useMemo 缓存，避免重复计算）
   const sortedCitations = useMemo(() => {
     return (message.citations ?? [])
-      .sort((a, b) => b.score - a.score)
-      .slice(0, CITATION_MAX_COUNT)
+      .sort((a, b) => b.score - a.score) // 按分数降序
+      .slice(0, CITATION_MAX_COUNT)      // 最多取5条
       .map((item) => ({
         ...item,
         source: cleanCitationText(item.source),
@@ -248,11 +278,13 @@ function MessageItemComponent({ message }: MessageItemProps) {
       }))
   }, [message.citations])
 
+   // 筛选高/低质量引用
   const highQualityCitations = sortedCitations.filter((item) => item.score >= CITATION_SCORE_THRESHOLD)
   const lowQualityCitations = sortedCitations.filter((item) => item.score < CITATION_SCORE_THRESHOLD)
   const answerMode: AnswerMode = message.answerMode ?? 'balanced'
   const transparencyBadge = buildTransparencyBadge(answerMode, sortedCitations)
 
+  // 控制展示多少条高质量引用
   const visibleCitations = highQualityExpanded ? highQualityCitations : highQualityCitations.slice(0, 1)
 
   return (
@@ -360,4 +392,5 @@ function MessageItemComponent({ message }: MessageItemProps) {
   )
 }
 
+// 使用 memo 包裹，防止不必要的重渲染（性能优化）
 export const MessageItem = memo(MessageItemComponent)

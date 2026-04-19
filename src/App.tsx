@@ -17,6 +17,10 @@ import {
   MAX_FILE_SIZE,
 } from './utils/attachmentParser'
 
+/**
+ * 流式任务元数据
+ * 存储正在流式输出的对话信息，用于暂停/继续/重生成
+ */
 interface StreamTaskMeta {
   assistantId: string
   prompt: string
@@ -25,6 +29,10 @@ interface StreamTaskMeta {
   baseContext: ChatMessage[]
 }
 
+/**
+ * 获取当前时间（格式化：HH:MM）
+ * 用于消息气泡的时间显示
+ */
 function nowTimeLabel(): string {
   return new Date().toLocaleTimeString('zh-CN', {
     hour: '2-digit',
@@ -33,9 +41,22 @@ function nowTimeLabel(): string {
   })
 }
 
+/**
+ * 项目根组件：App
+ * 功能：
+ * 1. 全局状态管理
+ * 2. 聊天逻辑（发送、流式输出、暂停、继续、重生成）
+ * 3. 文件上传
+ * 4. 页面切换（聊天 / 知识库）
+ * 5. 会话管理
+ * 6. 主题切换
+ */
 function App() {
+  // 存储流式关闭函数，用于中断请求
   const streamClosersRef = useRef<Map<string, () => void>>(new Map())
+  // 存储流式任务元数据，用于暂停后恢复
   const streamTasksRef = useRef<Map<string, StreamTaskMeta>>(new Map())
+  // 控制“重新生成”按钮是否可用
   const [regenerateFlags, setRegenerateFlags] = useState<Record<string, boolean>>({})
   const setCanRegenerate = (sessionId: string, canRegenerate: boolean) => {
     setRegenerateFlags((prev) => ({
@@ -44,7 +65,7 @@ function App() {
     }))
   }
 
-
+  // ====================== 会话状态 ======================
   const sessions = useSessionStore((state) => state.sessions)
   const activeSessionId = useSessionStore((state) => state.activeSessionId)
   const setActiveSessionId = useSessionStore((state) => state.setActiveSessionId)
@@ -54,6 +75,7 @@ function App() {
   const updateSessionPreview = useSessionStore((state) => state.updateSessionPreview)
   const updateSessionAnswerMode = useSessionStore((state) => state.updateSessionAnswerMode)
 
+  // ====================== 聊天消息状态 ======================
   const messagesBySession = useChatStore((state) => state.messagesBySession)
   const ensureSession = useChatStore((state) => state.ensureSession)
   const pushMessage = useChatStore((state) => state.pushMessage)
@@ -70,9 +92,11 @@ function App() {
   )
   const isPaused = useChatStore((state) => state.sessionPaused[activeSessionId] ?? false)
 
+  // ====================== 主题状态 ======================
   const themeMode = useThemeStore((state) => state.mode)
   const toggleTheme = useThemeStore((state) => state.toggleMode)
 
+  // ====================== UI 状态 ======================
   const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen)
   const page = useUIStore((state) => state.page)
   const activeKnowledgeBaseId = useUIStore((state) => state.activeKnowledgeBaseId)
@@ -86,25 +110,32 @@ function App() {
   const removeUpload = useUIStore((state) => state.removeUpload)
   const removeUploadsBySession = useUIStore((state) => state.removeUploadsBySession)
 
+  // 当前激活的会话
   const activeSession = useMemo(() => {
     return sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? null
   }, [activeSessionId, sessions])
 
+  // 当前会话的消息列表
   const activeMessages = messagesBySession.get(activeSessionId) ?? []
+  // 当前会话的上传文件
   const activeUploads = useMemo(
     () => uploads.filter((item) => item.sessionId === activeSessionId),
     [uploads, activeSessionId],
   )
+  // 是否有文件正在上传
   const activeUploadsUploading = useMemo(
     () => activeUploads.some((item) => item.status === 'queued' || item.status === 'uploading'),
     [activeUploads],
   )
+  // 当前会话的回答模式
   const activeAnswerMode: AnswerMode = activeSession?.answerMode ?? 'balanced'
 
+  // 切换主题（light/dark）
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
   }, [themeMode])
 
+  // 页面卸载时关闭所有流式连接
   useEffect(() => {
     const streamClosers = streamClosersRef.current
 
@@ -114,6 +145,7 @@ function App() {
     }
   }, [])
 
+  // 初始化：无会话时自动创建会话
   useEffect(() => {
     if (sessions.length === 0) {
       const created = createSession('glm-4-flash')
@@ -127,6 +159,7 @@ function App() {
     }
   }, [activeSessionId, createSession, ensureSession, sessions, setActiveSessionId])
 
+  // ====================== 核心：启动流式回答 ======================
   const startStreamReply = (
     sessionId: string,
     prompt: string,
@@ -139,12 +172,14 @@ function App() {
     const tokenKey = (import.meta.env.VITE_AUTH_TOKEN_KEY as string | undefined) ?? 'access_token'
     const token = window.localStorage.getItem(tokenKey) ?? undefined
 
+    // 覆盖模式：更新已有消息为流式状态
     if (assistantIdOverride) {
       updateMessageById(sessionId, assistantId, (message) => ({
         ...message,
         status: 'streaming',
       }))
     } else {
+      // 新增 AI 消息（空内容，流式填充）
       pushMessage(sessionId, {
         id: assistantId,
         role: 'assistant',
@@ -167,9 +202,10 @@ function App() {
     })
     setCanRegenerate(sessionId, true)
 
-    // 同一会话只保留一条流式连接，避免重复发送造成消息竞争。
+    // 关闭同会话旧流
     streamClosersRef.current.get(sessionId)?.()
 
+    // 调用流式接口
     const close = streamChatReply({
       sessionId,
       prompt,
@@ -188,6 +224,7 @@ function App() {
           content: item.content,
         })),
       token,
+      // 接收流式片段
       onChunk: (chunk) => {
         if (assistantIdOverride) {
           appendToMessageById(sessionId, assistantId, chunk)
@@ -195,12 +232,14 @@ function App() {
         }
         addChunkMessage(sessionId, chunk)
       },
+      // 接收引用来源
       onCitations: (citations) => {
         updateMessageById(sessionId, assistantId, (message) => ({
           ...message,
           citations,
         }))
       },
+      // 流式完成
       onDone: () => {
         updateMessageById(sessionId, assistantId, (message) => ({
           ...message,
@@ -218,6 +257,7 @@ function App() {
         setSessionPaused(sessionId, false)
         streamClosersRef.current.delete(sessionId)
       },
+      // 错误处理
       onError: (errorMessage) => {
         updateMessageById(sessionId, assistantId, (message) => ({
           ...message,
@@ -236,6 +276,7 @@ function App() {
     streamClosersRef.current.set(sessionId, close)
   }
 
+  // 暂停流式输出
   const handlePause = () => {
     if (!isStreaming) {
       return
@@ -260,6 +301,7 @@ function App() {
     }
   }
 
+  // 继续流式输出
   const handleResume = () => {
     const task = streamTasksRef.current.get(activeSessionId)
     if (!task || !isPaused) {
@@ -301,6 +343,7 @@ function App() {
     )
   }
 
+  // 重新生成回答
   const handleRegenerate = () => {
     const task = streamTasksRef.current.get(activeSessionId)
     if (!task) {
@@ -322,16 +365,19 @@ function App() {
     )
   }
 
+  // 新建会话
   const handleNewSession = () => {
     const session = createSession('glm-4-flash')
     ensureSession(session.id)
     setMobileSidebarOpen(false)
   }
 
+  // 重命名会话
   const handleRenameSession = (sessionId: string, title: string) => {
     renameSession(sessionId, title)
   }
 
+  // 删除会话
   const handleDeleteSession = (sessionId: string) => {
     streamClosersRef.current.get(sessionId)?.()
     streamClosersRef.current.delete(sessionId)
@@ -343,6 +389,7 @@ function App() {
     deleteSession(sessionId)
   }
 
+  // ====================== 文件上传处理 ======================
   const handlePickFile = (files: FileList) => {
     const fileList = Array.from(files)
     const queuedItems: UploadItem[] = fileList.map((file) => ({
@@ -408,6 +455,7 @@ function App() {
     )
   }
 
+  // ====================== 发送消息 ======================
   const handleSend = () => {
     const prompt = inputValue.trim()
     const readyUploads = activeUploads.filter((item) => item.status === 'done')
@@ -441,10 +489,12 @@ function App() {
       status: 'done',
     }
 
-    // 先插入用户消息，再触发 AI 流式回复，保持与真实链路一致。
+    // 插入用户消息
     pushMessage(activeSessionId, message)
     updateSessionPreview(activeSessionId, displayContent)
     setInputValue('')
+    
+    // 发送给 AI
     const modelContextMessages = [...activeMessages, { ...message, content: promptWithAttachments }]
     startStreamReply(
       activeSessionId,
@@ -454,9 +504,11 @@ function App() {
       modelContextMessages,
     )
 
+    // 清空已发送附件
     readyUploads.forEach((item) => removeUpload(item.id))
   }
 
+  // 清空当前会话消息
   const handleClearMessages = () => {
     clearSessionMessages(activeSessionId)
     streamTasksRef.current.delete(activeSessionId)
@@ -464,6 +516,7 @@ function App() {
     updateSessionPreview(activeSessionId, '会话已清空')
   }
 
+  // 导出对话记录（JSON）
   const handleExport = () => {
     const payload = JSON.stringify(activeMessages, null, 2)
     const blob = new Blob([payload], { type: 'application/json;charset=utf-8' })
@@ -475,8 +528,10 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  // ====================== 页面渲染 ======================
   return (
     <div className="relative mx-auto flex h-screen w-full max-w-[1440px] overflow-hidden bg-slate-50 lg:p-4">
+      {/* 移动端遮罩层 */}
       {mobileSidebarOpen && (
         <button
           type="button"
@@ -486,6 +541,7 @@ function App() {
         />
       )}
 
+      {/* 左侧会话侧边栏 */}
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -497,7 +553,9 @@ function App() {
         onCloseMobile={() => setMobileSidebarOpen(false)}
       />
 
+      {/* 主内容区 */}
       <section className="flex h-full flex-1 flex-col overflow-hidden bg-slate-50 lg:ml-0 lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white">
+        {/* 顶部导航栏 */}
         <TopBar
           title={page === 'knowledge-base' ? '本地知识库管理' : (activeSession?.title ?? '新对话')}
           model={activeSession?.model ?? 'glm-4-flash'}
@@ -517,14 +575,17 @@ function App() {
           onExport={handleExport}
         />
 
+        {/* 页面内容：知识库 / 聊天 */}
         {page === 'knowledge-base' ? (
           <KnowledgeBasePage />
         ) : (
           <>
+            {/* 消息列表（虚拟滚动） */}
             <div className="flex-1 overflow-hidden">
               <MessageList messages={activeMessages} />
             </div>
 
+            {/* 聊天输入框 */}
             <ChatInput
               value={inputValue}
               answerMode={activeAnswerMode}

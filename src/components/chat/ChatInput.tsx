@@ -2,7 +2,10 @@ import { useRef } from 'react'
 import { UploadPreview } from './UploadPreview'
 import type { AnswerMode, UploadItem } from '../../types/chat'
 import { ACCEPT_ATTRIBUTE } from '../../utils/attachmentParser'
-
+/**
+ * 聊天输入框组件的 Props 定义
+ * 接收状态、回调函数，控制输入框行为
+ */
 interface ChatInputProps {
   value: string
   disabled?: boolean
@@ -15,6 +18,10 @@ interface ChatInputProps {
   onRemoveUpload: (uploadId: string) => void
 }
 
+/**
+ * 回答模式配置（严格 / 平衡 / 通用）
+ * 每个模式包含值、显示名称、提示说明
+ */
 const MODE_OPTIONS: Array<{
   value: AnswerMode
   label: string
@@ -37,6 +44,10 @@ const MODE_OPTIONS: Array<{
   },
 ]
 
+/**
+ * 聊天输入框主组件
+ * 包含：文件预览、回答模式切换、文本输入、文件上传、发送按钮
+ */
 export function ChatInput({
   value,
   disabled = false,

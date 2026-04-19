@@ -26,3 +26,11 @@ server/.env
 *.sw?
 
 .agents/
+
+# SQLite 数据库文件
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+server/data/*.sqlite
+server/data/*.sqlite-shm
+server/data/*.sqlite-wal

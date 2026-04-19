@@ -27,6 +27,7 @@
 
 - `project-overview.md`：项目概述、技术栈、功能实现与技术亮点。
 - `project-structure.md`：当前文件，说明项目结构与职责分工。
+- `resume-project-writeup.md`：简历项目写法模板（标准版、校招版、前后端偏向版）。
 
 ## 3. 前端目录 src
 
@@ -78,8 +79,10 @@
 
 ### 3.6 其他目录
 
-- `mocks/chatData.ts`：会话与消息初始 mock 数据。
 - `utils/attachmentParser.ts`：前端附件解析工具（pdfjs/JSZip），支持提取文本并生成发送上下文。
+
+说明：
+- 当前版本已移除前端 mock 初始化数据，聊天与知识库数据均来自真实运行时状态。
 
 ## 4. 后端目录 server
 
@@ -93,14 +96,17 @@
 
 ### 4.2 核心代码 server/src
 
-- `index.js`：后端主入口；包含健康检查、知识库接口、上传解析、SSE 转发、RAG 注入与模式策略。
-- `ragStore.js`：SQLite 存储层；负责知识库/文档/切片管理、向量检索与混合检索排序。
+- `index.js`：后端主入口；包含健康检查、聊天流式接口、知识库管理接口、文档上传解析与 RAG 注入。
+- `ragStore.js`：SQLite 存储层；负责知识库创建、文档切片入库、索引重建、向量/关键词混合检索。
 - `embeddingClient.js`：Embedding 客户端封装；统一向量接口调用与返回处理。
 
 ### 4.3 数据目录 server/data
 
-- `rag.sqlite`：知识库主数据库。
-- `rag.sqlite-shm`、`rag.sqlite-wal`：SQLite WAL 模式相关文件。
+- `rag.sqlite`：知识库主数据库（运行时生成）。
+- `rag.sqlite-shm`、`rag.sqlite-wal`：SQLite WAL 模式相关文件（运行时生成）。
+
+说明：
+- 数据库文件属于运行时产物，已通过 `.gitignore` 忽略，不作为项目静态样例数据提交。
 
 ## 5. 关键调用链路（快速定位）
 
@@ -114,12 +120,18 @@
 ### 5.2 知识库链路
 
 1. `src/components/knowledge/KnowledgeBasePage.tsx` 触发文档上传。
-2. `src/services/knowledgeApi.ts` 调用上传与检索接口。
+2. `src/services/knowledgeApi.ts` 调用知识库列表、新建、上传、启停、重建与检索测试接口。
 3. `server/src/index.js` 接收上传，解析文本后调用 `ragStore.ingestDocument`。
-4. `server/src/ragStore.js` 完成切片、索引与检索。
+4. `server/src/ragStore.js` 完成切片、索引写入、状态统计与检索排序。
 
 ### 5.3 会话附件链路
 
 1. `src/components/chat/ChatInput.tsx` 选择附件。
 2. `src/App.tsx` 调用 `src/utils/attachmentParser.ts` 提取正文。
 3. 发送时将附件正文拼接到 prompt 上下文再走对话链路。
+
+## 6. 快速上手建议
+
+1. 先看 `src/App.tsx`：理解会话、流式回复、附件注入的主编排逻辑。
+2. 再看 `src/components/knowledge/KnowledgeBasePage.tsx`：理解知识库管理与检索测试流程。
+3. 最后看 `server/src/index.js` + `server/src/ragStore.js`：理解后端接口与存储实现边界。
