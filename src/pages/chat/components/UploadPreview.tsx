@@ -1,4 +1,4 @@
-import type { UploadItem } from '../../types/chat'
+import type { UploadItem } from '../../../types/chat'
 
 // 组件接收的参数：
 // uploads：当前正在上传/已上传的文件列表

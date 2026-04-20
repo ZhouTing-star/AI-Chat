@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { UploadPreview } from './UploadPreview'
-import type { AnswerMode, UploadItem } from '../../types/chat'
-import { ACCEPT_ATTRIBUTE } from '../../utils/attachmentParser'
+import type { AnswerMode, UploadItem } from '../../../types/chat'
+import { ACCEPT_ATTRIBUTE } from '../../../utils/attachmentParser'
 /**
  * 聊天输入框组件的 Props 定义
  * 接收状态、回调函数，控制输入框行为

@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { List, type RowComponentProps, useListRef } from 'react-window'
 import { MessageItem } from './MessageItem'
-import type { ChatMessage } from '../../types/chat'
+import type { ChatMessage } from '../../../types/chat'
 
 // 消息列表 props：接收消息数组
 interface MessageListProps {

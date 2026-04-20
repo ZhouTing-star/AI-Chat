@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import remarkGfm from 'remark-gfm'
-import type { AnswerMode, ChatMessage, MessageType } from '../../types/chat'
+import type { AnswerMode, ChatMessage, MessageType } from '../../../types/chat'
 
 // 组件接收的 Props：单条消息对象
 interface MessageItemProps {

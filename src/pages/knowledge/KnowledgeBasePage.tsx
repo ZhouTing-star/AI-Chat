@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { AppShell } from '../../components/layout/AppShell'
+import { Sidebar } from '../../components/layout/Sidebar'
+import { TopBar } from '../../components/layout/TopBar'
+import { useSessionSidebar } from '../../hooks/useSessionSidebar'
 import {
   createKnowledgeBase,
   deleteKnowledgeDocument,
@@ -10,6 +14,7 @@ import {
   toggleKnowledgeBaseActive,
   uploadKnowledgeDocument,
 } from '../../services/knowledgeApi'
+import { useThemeStore } from '../../store/themeStore'
 import { useUIStore } from '../../store/uiStore'
 import type { DocumentItem, KnowledgeBase, SearchResult } from '../../types/knowledge'
 
@@ -102,6 +107,22 @@ export function KnowledgeBasePage() {
   const [deletingDocumentId, setDeletingDocumentId] = useState('')
   // 上传任务列表（显示进度条）
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([])
+
+  const {
+    sessions,
+    activeSession,
+    activeSessionId,
+    mobileSidebarOpen,
+    setMobileSidebarOpen,
+    setActiveSessionId,
+    handleNewSession,
+    handleRenameSession,
+    handleDeleteSession,
+  } = useSessionSidebar()
+
+  const themeMode = useThemeStore((state) => state.mode)
+  const toggleTheme = useThemeStore((state) => state.toggleMode)
+  const setPage = useUIStore((state) => state.setPage)
 
   // 全局状态：当前选中的知识库ID
   const activeKbId = useUIStore((state) => state.activeKnowledgeBaseId)
@@ -385,8 +406,44 @@ export function KnowledgeBasePage() {
   // 页面渲染
   // ——————————————————————————————
   return (
-    <div className="h-full overflow-auto px-4 py-4 lg:px-6">
-      <div className="grid gap-4 lg:grid-cols-12">
+    <AppShell
+      mobileSidebarOpen={mobileSidebarOpen}
+      onCloseMobileSidebar={() => setMobileSidebarOpen(false)}
+      sidebar={
+        <Sidebar
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={setActiveSessionId}
+          onNewSession={handleNewSession}
+          onRenameSession={handleRenameSession}
+          onDeleteSession={handleDeleteSession}
+          mobileOpen={mobileSidebarOpen}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
+        />
+      }
+      header={
+        <TopBar
+          title="本地知识库管理"
+          model={activeSession?.model ?? 'glm-4-flash'}
+          themeMode={themeMode}
+          isKnowledgeBasePage
+          isStreaming={false}
+          isPaused={false}
+          canRegenerate={false}
+          onOpenSidebar={() => setMobileSidebarOpen(true)}
+          onOpenKnowledgeBase={() => setPage('knowledge-base')}
+          onBackToChat={() => setPage('chat')}
+          onToggleTheme={toggleTheme}
+          onPause={() => {}}
+          onResume={() => {}}
+          onRegenerate={() => {}}
+          onClear={() => {}}
+          onExport={() => {}}
+        />
+      }
+    >
+      <div className="h-full overflow-auto px-4 py-4 lg:px-6">
+        <div className="grid gap-4 lg:grid-cols-12">
 
         {/* 左侧：知识库列表 */}
         <section className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-3">
@@ -630,7 +687,8 @@ export function KnowledgeBasePage() {
             重建索引
           </button>
         </section>
+        </div>
       </div>
-    </div>
+    </AppShell>
   )
 }
